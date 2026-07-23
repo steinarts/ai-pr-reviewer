@@ -9,8 +9,7 @@ from .models import Severity
 
 
 class LLMClient(Protocol):
-    def review(self, prompt: str) -> str:
-        ...
+    def review(self, prompt: str) -> str: ...
 
 
 class FakeLLMClient:

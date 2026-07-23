@@ -12,7 +12,7 @@ def _build_prompt(reviewer: str, template: str, context: ReviewContext) -> str:
         f"REVIEWER: {reviewer}\n"
         f"BASE: {context.base}\n"
         f"HEAD: {context.head}\n"
-        "RULES: Return JSON only with schema {\"findings\": [...]}\n\n"
+        'RULES: Return JSON only with schema {"findings": [...]}\n\n'
         f"{template}\n\n"
         f"DIFF:\n{context.diff_text}\n\n"
         f"FILE_CONTEXTS:\n{json.dumps(context.file_contexts, ensure_ascii=False)}"
