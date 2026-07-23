@@ -1,0 +1,27 @@
+[project]
+name = "ai-pr-reviewer"
+version = "0.1.0"
+description = "Local AI-based pull request reviewer (phase 1-2 skeleton)"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "pydantic>=2,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.6.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
