@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
 from .context_builder import build_context
 from .deduplicator import deduplicate_findings
 from .git_diff import GitDiffError, collect_diff
 from .guard import guard_findings
-from .llm_client import FakeLLMClient, OpenAILLMClient
+from .llm_factory import create_llm_client
 from .models import ReviewMetadata, ReviewResult, Severity
 from .output import print_summary, write_json
 from .scouts import run_reviewers
@@ -20,15 +19,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Local AI PR reviewer")
     parser.add_argument("--base", required=True)
     parser.add_argument("--head", required=True)
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--fake-llm", action="store_true")
     parser.add_argument("--output", default="review-result.json")
+    parser.add_argument(
+        "--provider",
+        choices=["fake", "ollama"],
+        default="fake",
+        help="LLM provider (default: fake)",
+    )
+    parser.add_argument(
+        "--model",
+        default="",
+        help="Model name (required for ollama, e.g., qwen2.5-coder:7b)",
+    )
+    parser.add_argument(
+        "--ollama-host",
+        default="http://localhost:11434",
+        help="Ollama server host (default: http://localhost:11434)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Use fake LLM (same as --provider fake)",
+    )
     parser.add_argument("--max-files", type=int, default=30)
     parser.add_argument("--max-diff-lines", type=int, default=3000)
     parser.add_argument("--max-published", type=int, default=3)
     parser.add_argument("--min-confidence", type=float, default=0.85)
     parser.add_argument("--severities", nargs="*", default=["high", "critical"])
-    parser.add_argument("--model", default=os.getenv("AI_REVIEW_MODEL", ""))
     return parser.parse_args(argv)
 
 
@@ -52,14 +69,18 @@ def main(argv: list[str] | None = None) -> int:
 
     context = build_context(snapshot=snapshot, head=args.head, cwd=cwd)
 
-    use_fake = args.fake_llm or args.dry_run
-    if use_fake:
-        llm_client = FakeLLMClient()
-    else:
-        if not os.getenv("OPENAI_API_KEY"):
-            print("OPENAI_API_KEY mangler. Bruk --dry-run eller --fake-llm.")
-            return 2
-        llm_client = OpenAILLMClient(model=args.model)
+    # Determine provider: --dry-run forces fake, otherwise use --provider
+    provider = "fake" if args.dry_run else args.provider
+
+    try:
+        llm_client = create_llm_client(
+            provider=provider,
+            model=args.model,
+            ollama_host=args.ollama_host,
+        )
+    except (ValueError, ConnectionError) as e:
+        print(f"Error: {e}")
+        return 2
 
     print(f"Comparing commits: {args.base}...{args.head}")
     print(f"Changed files: {len(snapshot.changed_files)}")

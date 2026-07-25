@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Protocol
 
@@ -9,15 +8,23 @@ from .models import Severity
 
 
 class LLMClient(Protocol):
-    def review(self, prompt: str) -> str: ...
+    """Protocol for LLM clients (FakeLLMClient, OllamaLLMClient, etc.)."""
+
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
+        """Generate a response given system and user prompts."""
+        ...
 
 
 class FakeLLMClient:
-    def review(self, prompt: str) -> str:
+    """Fake LLM client for testing without API calls."""
+
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
+        """Return a fake JSON response with findings."""
+        # Determine reviewer from the system prompt
         reviewer = "bug"
-        if "REVIEWER: reliability" in prompt:
+        if "reliability" in system_prompt.lower():
             reviewer = "reliability"
-        elif "REVIEWER: security" in prompt:
+        elif "security" in system_prompt.lower():
             reviewer = "security"
 
         payload = {
@@ -65,16 +72,8 @@ class FakeLLMClient:
         return json.dumps(payload, ensure_ascii=False)
 
 
-class OpenAILLMClient:
-    def __init__(self, model: str | None = None) -> None:
-        self.model = model or os.getenv("AI_REVIEW_MODEL", "")
-        self.api_key = os.getenv("OPENAI_API_KEY", "")
-
-    def review(self, prompt: str) -> str:
-        raise NotImplementedError("OpenAI client is not implemented in phase 1-2")
-
-
 def load_prompt(prompts_dir: Path, reviewer: str) -> str:
+    """Load a prompt template from the prompts directory."""
     prompt_path = prompts_dir / f"{reviewer}_reviewer.md"
     if not prompt_path.exists():
         return "Return JSON only."

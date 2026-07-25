@@ -39,7 +39,7 @@ def test_cli_fake_writes_json(tmp_path: Path, monkeypatch) -> None:
             "HEAD~1",
             "--head",
             "HEAD",
-            "--fake-llm",
+            "--dry-run",
             "--output",
             str(output),
         ]
@@ -62,7 +62,11 @@ def test_cli_handles_invalid_json_from_llm(tmp_path: Path, monkeypatch) -> None:
     from reviewer import llm_client as llm_module
 
     monkeypatch.chdir(repo)
-    monkeypatch.setattr(llm_module.FakeLLMClient, "review", lambda self, prompt: "{not-json")
+    monkeypatch.setattr(
+        llm_module.FakeLLMClient,
+        "generate",
+        lambda self, system_prompt, user_prompt: "{not-json",
+    )
 
     exit_code = main(
         [
@@ -70,7 +74,7 @@ def test_cli_handles_invalid_json_from_llm(tmp_path: Path, monkeypatch) -> None:
             "HEAD~1",
             "--head",
             "HEAD",
-            "--fake-llm",
+            "--dry-run",
             "--output",
             str(output),
         ]
@@ -89,7 +93,11 @@ def test_cli_handles_empty_findings_list(tmp_path: Path, monkeypatch) -> None:
     from reviewer import llm_client as llm_module
 
     monkeypatch.chdir(repo)
-    monkeypatch.setattr(llm_module.FakeLLMClient, "review", lambda self, prompt: '{"findings": []}')
+    monkeypatch.setattr(
+        llm_module.FakeLLMClient,
+        "generate",
+        lambda self, system_prompt, user_prompt: '{"findings": []}',
+    )
 
     exit_code = main(
         [
@@ -97,7 +105,7 @@ def test_cli_handles_empty_findings_list(tmp_path: Path, monkeypatch) -> None:
             "HEAD~1",
             "--head",
             "HEAD",
-            "--fake-llm",
+            "--dry-run",
             "--output",
             str(output),
         ]
