@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Review dry-run",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/review.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": [
+        "--base",
+        "HEAD~1",
+        "--head",
+        "HEAD",
+        "--dry-run"
+      ]
+    }
+  ]
+}

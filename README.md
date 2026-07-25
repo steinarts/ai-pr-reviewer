@@ -18,9 +18,9 @@ pip install -e .[dev]
 ## Kjøring
 
 ```bash
-python review.py --base master --head feature/test --fake-llm
+python review.py --base main --head <feature-branch> --fake-llm
 python review.py --base HEAD~1 --head HEAD --dry-run
-python review.py --base master --head feature/test --output review-result.json --fake-llm
+python review.py --base main --head HEAD --output review-result.json --fake-llm
 ```
 
 ## Hva som er implementert i fase 1-2
