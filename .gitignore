@@ -23,3 +23,5 @@ Thumbs.db
 
 *.egg-info/
 review-result.json
+review-*.json
+test-*.json
