@@ -85,6 +85,15 @@ class TestFakeLLMClient:
         payload = json.loads(response)
         assert payload["findings"][0]["reviewer"] == "bug"
 
+    def test_generate_ignores_unsupported_reviewer_value(self) -> None:
+        client = FakeLLMClient()
+        response = client.generate(
+            system_prompt="You are a security reviewer.",
+            user_prompt="REVIEWER: nonsense\nREVIEWER: security\nDIFF:\n...",
+        )
+        payload = json.loads(response)
+        assert payload["findings"][0]["reviewer"] == "security"
+
 
 class TestHardTimeout:
     def test_hard_timeout_returns_quickly_for_blocking_call(self) -> None:

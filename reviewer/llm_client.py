@@ -33,7 +33,6 @@ class FakeLLMClient:
             reviewer = line.partition(":")[2].strip().lower()
             if reviewer in supported_reviewers:
                 return reviewer
-            break
         return "bug"
 
     def generate(
