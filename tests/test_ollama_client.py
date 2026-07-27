@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import multiprocessing
 import time
 from unittest.mock import MagicMock, patch
@@ -51,6 +52,38 @@ class TestLLMFactory:
         )
         assert isinstance(client, OllamaLLMClient)
         assert client.max_output_tokens == 321
+
+
+class TestFakeLLMClient:
+    @pytest.mark.parametrize("reviewer", ["bug", "reliability", "security", "consolidated"])
+    def test_generate_uses_explicit_reviewer_line(self, reviewer: str) -> None:
+        client = FakeLLMClient()
+        response = client.generate(
+            system_prompt="You are reliability reviewer.",
+            user_prompt=f"REVIEWER: {reviewer}\nDIFF:\n...",
+        )
+        payload = json.loads(response)
+
+        assert payload["findings"][0]["reviewer"] == reviewer
+        assert payload["findings"][0]["category"] == reviewer
+
+    def test_generate_does_not_infer_reviewer_from_system_prompt(self) -> None:
+        client = FakeLLMClient()
+        response = client.generate(
+            system_prompt="You are a security reviewer.",
+            user_prompt="REVIEWER: bug\nDIFF:\n...",
+        )
+        payload = json.loads(response)
+        assert payload["findings"][0]["reviewer"] == "bug"
+
+    def test_generate_falls_back_to_bug_when_reviewer_line_missing(self) -> None:
+        client = FakeLLMClient()
+        response = client.generate(
+            system_prompt="You are a security reviewer.",
+            user_prompt="DIFF:\n...",
+        )
+        payload = json.loads(response)
+        assert payload["findings"][0]["reviewer"] == "bug"
 
 
 class TestHardTimeout:

@@ -24,6 +24,18 @@ class LLMClient(Protocol):
 class FakeLLMClient:
     """Fake LLM client for testing without API calls."""
 
+    @staticmethod
+    def _reviewer_from_user_prompt(user_prompt: str) -> str:
+        supported_reviewers = {"bug", "reliability", "security", "consolidated"}
+        for line in user_prompt.splitlines():
+            if not line.startswith("REVIEWER:"):
+                continue
+            reviewer = line.partition(":")[2].strip().lower()
+            if reviewer in supported_reviewers:
+                return reviewer
+            break
+        return "bug"
+
     def generate(
         self,
         system_prompt: str,
@@ -32,12 +44,7 @@ class FakeLLMClient:
         response_schema: dict[str, object] | None = None,
     ) -> str:
         """Return a fake JSON response with findings."""
-        # Determine reviewer from the system prompt
-        reviewer = "bug"
-        if "reliability" in system_prompt.lower():
-            reviewer = "reliability"
-        elif "security" in system_prompt.lower():
-            reviewer = "security"
+        reviewer = self._reviewer_from_user_prompt(user_prompt)
 
         payload = {
             "findings": [
