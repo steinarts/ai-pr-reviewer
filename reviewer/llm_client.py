@@ -10,7 +10,13 @@ from .models import Severity
 class LLMClient(Protocol):
     """Protocol for LLM clients (FakeLLMClient, OllamaLLMClient, etc.)."""
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        response_schema: dict[str, object] | None = None,
+    ) -> str:
         """Generate a response given system and user prompts."""
         ...
 
@@ -18,7 +24,13 @@ class LLMClient(Protocol):
 class FakeLLMClient:
     """Fake LLM client for testing without API calls."""
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        response_schema: dict[str, object] | None = None,
+    ) -> str:
         """Return a fake JSON response with findings."""
         # Determine reviewer from the system prompt
         reviewer = "bug"

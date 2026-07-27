@@ -26,7 +26,7 @@ class Finding(BaseModel):
     line: int
     category: str
     severity: Severity
-    confidence: float
+    confidence: float = Field(ge=0.0, le=1.0)
     title: str
     evidence: str
     consequence: str
@@ -42,6 +42,20 @@ class Finding(BaseModel):
 
 class FindingsPayload(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
+
+
+class ReviewerFailure(BaseModel):
+    reviewer: str
+    chunk_index: int
+    error_type: str
+    message: str
+
+
+class ReviewerSkip(BaseModel):
+    reviewer: str
+    chunk_index: int
+    reason: str
+    message: str = ""
 
 
 @dataclass(slots=True)
@@ -75,6 +89,18 @@ class ReviewMetadata(BaseModel):
     changed_files: int
     diff_lines: int
     reviewers: list[str]
+    review_mode: str = "separate"
+    reviewer_failures: list[ReviewerFailure] = Field(default_factory=list)
+    reviewer_skips: list[ReviewerSkip] = Field(default_factory=list)
+    completed_requests: int = 0
+    failed_requests: int = 0
+    planned_requests: int = 0
+    skipped_requests: int = 0
+    reviewable_chunks: int = 0
+    skipped_chunks: int = 0
+    chunk_count: int = 0
+    total_elapsed_seconds: float = 0.0
+    total_time_budget_seconds: float = 0.0
 
 
 class ReviewResult(BaseModel):
