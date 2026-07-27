@@ -994,7 +994,9 @@ def run_reviewers(
                     "chunk_file_count": len(chunk_files),
                     "chunk_files": chunk_files,
                     "file_class": chunk.file_class,
-                    "prompt_budget_tokens": max_prompt_tokens,
+                    "prompt_budget_tokens": min(test_max_prompt_tokens, max_prompt_tokens)
+                    if chunk.file_class == FILE_CLASS_TEST
+                    else max_prompt_tokens,
                     "estimated_prompt_tokens": estimated_prompt_tokens,
                     "configured_timeout_seconds": configured_timeout_seconds,
                     "system_prompt_chars": system_chars,
