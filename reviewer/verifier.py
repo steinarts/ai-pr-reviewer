@@ -556,6 +556,24 @@ class LLMFindingVerifier:
                 context_lines=context.context_lines,
             )
             if not slice_context.found_line_in_diff:
+                skipped = _with_verification_metadata(
+                    finding,
+                    status=VerificationStatus.SKIPPED,
+                    verdict="",
+                    confidence=None,
+                    reason="verification skipped: line_not_found_in_diff_hunk",
+                    evidence_lines=[],
+                    model=context.verification_model,
+                    elapsed_ms=0,
+                    context_line_start=slice_context.context_line_start,
+                    context_line_end=slice_context.context_line_end,
+                    line_in_context=False,
+                    prompt_chars=None,
+                    response_text="",
+                )
+                verified_findings.append(skipped)
+                skipped_requests += 1
+                skipped_count += 1
                 self._emit(
                     {
                         "event": "verification_skipped",
@@ -566,11 +584,7 @@ class LLMFindingVerifier:
                     },
                     events,
                 )
-
-            system_prompt, user_prompt = _build_verification_prompts(
-                finding, context, slice_context
-            )
-            prompt_chars = len(system_prompt) + len(user_prompt)
+                continue
 
             started = perf_counter()
             self._emit(
