@@ -10,6 +10,9 @@ def create_llm_client(
     ollama_host: str = "http://localhost:11434",
     llm_timeout: float = 300.0,
     llm_max_output_tokens: int = 700,
+    deterministic_seed: int | None = None,
+    temperature: float = 0.0,
+    top_p: float | None = None,
 ) -> LLMClient:
     """Create an LLM client based on provider.
 
@@ -36,6 +39,9 @@ def create_llm_client(
             host=ollama_host,
             timeout=llm_timeout,
             max_output_tokens=llm_max_output_tokens,
+            seed=deterministic_seed,
+            temperature=temperature,
+            top_p=top_p,
         )
     else:
         raise ValueError(f"Unknown provider: {provider}. Choose from: fake, ollama")

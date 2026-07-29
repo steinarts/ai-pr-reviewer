@@ -1,0 +1,19 @@
+{
+  "case_id": "real_command_injection",
+  "clean": false,
+  "expected_findings": [
+    {
+      "file": "src/runner.py",
+      "line_start": 4,
+      "line_end": 6,
+      "category": "security",
+      "severity": ["high"],
+      "concept": "command injection via shell true",
+      "concept_id": "command_injection"
+    }
+  ],
+  "forbidden_concepts": [
+    "database",
+    "resource leak"
+  ]
+}

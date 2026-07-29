@@ -1,0 +1,10 @@
+{
+  "case_id": "clean_model_argument",
+  "clean": true,
+  "expected_findings": [],
+  "forbidden_concepts": [
+    "command injection",
+    "arbitrary code execution",
+    "shell execution"
+  ]
+}

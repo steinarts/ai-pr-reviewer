@@ -20,6 +20,13 @@ class Status(StrEnum):
     REJECTED = "rejected"
 
 
+class VerificationStatus(StrEnum):
+    VALID = "valid"
+    INVALID = "invalid"
+    UNVERIFIED = "unverified"
+    SKIPPED = "skipped"
+
+
 class Finding(BaseModel):
     id: str
     file: str
@@ -38,6 +45,18 @@ class Finding(BaseModel):
     reviewer: str = ""
     status: Status = Status.PROPOSED
     rejection_reason: str = ""
+    verification_status: VerificationStatus | None = None
+    verification_verdict: str = ""
+    verification_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    verification_reason: str = ""
+    verification_evidence_lines: list[int] = Field(default_factory=list)
+    verification_model: str = ""
+    verification_elapsed_ms: int | None = None
+    verification_context_line_start: int | None = None
+    verification_context_line_end: int | None = None
+    verification_line_in_context: bool | None = None
+    verification_prompt_chars: int | None = None
+    verification_response_text: str = ""
 
 
 class FindingsPayload(BaseModel):
@@ -101,9 +120,26 @@ class ReviewMetadata(BaseModel):
     chunk_count: int = 0
     total_elapsed_seconds: float = 0.0
     total_time_budget_seconds: float = 0.0
+    verification_enabled: bool = False
+    verification_model: str = ""
+    verification_fail_policy: str = "unverified"
+    verification_uncertain_policy: str = "unverified"
+    verification_requests_planned: int = 0
+    verification_requests_completed: int = 0
+    verification_requests_failed: int = 0
+    verification_requests_skipped: int = 0
+    verification_valid_count: int = 0
+    verification_invalid_count: int = 0
+    verification_uncertain_count: int = 0
+    verification_unverified_count: int = 0
+    verification_skipped_count: int = 0
+    verification_elapsed_seconds: float = 0.0
 
 
 class ReviewResult(BaseModel):
     metadata: ReviewMetadata
+    candidate_findings: list[Finding] = Field(default_factory=list)
+    verified_findings: list[Finding] = Field(default_factory=list)
+    verification_rejected_findings: list[Finding] = Field(default_factory=list)
     accepted_findings: list[Finding]
     rejected_findings: list[Finding]

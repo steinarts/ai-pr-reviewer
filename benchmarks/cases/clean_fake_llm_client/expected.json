@@ -1,0 +1,10 @@
+{
+  "case_id": "clean_fake_llm_client",
+  "clean": true,
+  "expected_findings": [],
+  "forbidden_concepts": [
+    "database",
+    "SQL injection",
+    "resource leak"
+  ]
+}

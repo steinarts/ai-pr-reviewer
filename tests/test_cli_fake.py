@@ -56,6 +56,36 @@ def test_cli_fake_writes_json(tmp_path: Path, monkeypatch) -> None:
     assert "rejected_findings" in data
 
 
+def test_cli_verification_disabled_keeps_candidate_pipeline_unchanged(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    output = tmp_path / "review-result-no-verify.json"
+
+    monkeypatch.chdir(repo)
+    exit_code = main(
+        [
+            "--base",
+            "HEAD~1",
+            "--head",
+            "HEAD",
+            "--dry-run",
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert exit_code == 0
+    data = json.loads(output.read_text(encoding="utf-8"))
+    assert data["metadata"]["verification_enabled"] is False
+    assert data["metadata"]["verification_requests_planned"] == 0
+    assert data["metadata"]["verification_requests_completed"] == 0
+    assert data["metadata"]["verification_requests_failed"] == 0
+    assert data["metadata"]["verification_requests_skipped"] == 0
+    assert data["candidate_findings"] == data["verified_findings"]
+
+
 def test_cli_handles_invalid_json_from_llm(tmp_path: Path, monkeypatch) -> None:
     repo = _init_repo(tmp_path)
     output = tmp_path / "review-result-invalid.json"

@@ -16,11 +16,23 @@ def _ollama_chat_worker(
     model: str,
     timeout: float,
     max_output_tokens: int,
+    seed: int | None,
+    temperature: float,
+    top_p: float | None,
     system_prompt: str,
     user_prompt: str,
     response_schema: dict[str, object] | None,
 ) -> str:
     client = Client(host=host, timeout=timeout)
+    options: dict[str, object] = {
+        "temperature": temperature,
+        "num_predict": max_output_tokens,
+    }
+    if seed is not None:
+        options["seed"] = seed
+    if top_p is not None:
+        options["top_p"] = top_p
+
     request: dict[str, object] = {
         "model": model,
         "messages": [
@@ -28,7 +40,7 @@ def _ollama_chat_worker(
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
-        "options": {"temperature": 0, "num_predict": max_output_tokens},
+        "options": options,
     }
     if response_schema is not None:
         request["format"] = response_schema
@@ -54,6 +66,9 @@ class OllamaLLMClient:
         host: str = "http://localhost:11434",
         timeout: float = 300.0,
         max_output_tokens: int = 700,
+        seed: int | None = None,
+        temperature: float = 0.0,
+        top_p: float | None = None,
         worker_func=_ollama_chat_worker,
     ) -> None:
         """Initialize Ollama client.
@@ -67,6 +82,9 @@ class OllamaLLMClient:
         self.host = host
         self.timeout = timeout
         self.max_output_tokens = max_output_tokens
+        self.seed = seed
+        self.temperature = temperature
+        self.top_p = top_p
         self._timeout_margin_seconds = 0.25
         self.client = Client(host=host, timeout=timeout)
         self._worker_func = worker_func
@@ -132,6 +150,9 @@ class OllamaLLMClient:
                     "model": self.model,
                     "timeout": timeout_seconds,
                     "max_output_tokens": self.max_output_tokens,
+                    "seed": self.seed,
+                    "temperature": self.temperature,
+                    "top_p": self.top_p,
                     "system_prompt": system_prompt,
                     "user_prompt": user_prompt,
                     "response_schema": response_schema,

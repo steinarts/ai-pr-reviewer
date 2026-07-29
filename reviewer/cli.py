@@ -13,6 +13,7 @@ from .llm_factory import create_llm_client
 from .models import ReviewMetadata, ReviewResult, Severity
 from .output import print_summary, write_json
 from .scouts import REVIEW_MODE_CONSOLIDATED, REVIEW_MODE_SEPARATE, ReviewParseError, run_reviewers
+from .verifier import LLMFindingVerifier, VerificationContext
 
 DEFAULT_REVIEWERS = ["bug", "reliability", "security"]
 
@@ -100,6 +101,52 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=REVIEW_MODE_CONSOLIDATED,
         help="Review strategy: consolidated (default) or separate",
     )
+    parser.add_argument(
+        "--verify-findings",
+        action="store_true",
+        help="Enable second-step skeptical verification for candidate findings",
+    )
+    parser.add_argument(
+        "--verification-model",
+        default="",
+        help="Verification model (defaults to review model)",
+    )
+    parser.add_argument(
+        "--verification-timeout-seconds",
+        type=float,
+        default=60.0,
+        help="Per-finding verification timeout in seconds (default: 60)",
+    )
+    parser.add_argument(
+        "--verification-total-budget-seconds",
+        type=float,
+        default=180.0,
+        help="Total verification wall-clock budget in seconds (default: 180)",
+    )
+    parser.add_argument(
+        "--verification-max-findings",
+        type=int,
+        default=5,
+        help="Max candidate findings to verify per review (default: 5)",
+    )
+    parser.add_argument(
+        "--verification-min-confidence",
+        type=float,
+        default=0.8,
+        help="Minimum verifier confidence required for valid verdicts (default: 0.8)",
+    )
+    parser.add_argument(
+        "--verification-fail-policy",
+        choices=["unverified", "reject"],
+        default="unverified",
+        help="Behavior on verifier timeout/parse failure (default: unverified)",
+    )
+    parser.add_argument(
+        "--verification-uncertain-policy",
+        choices=["unverified", "reject"],
+        default="unverified",
+        help="Behavior on uncertain verifier verdicts (default: unverified)",
+    )
     return parser.parse_args(argv)
 
 
@@ -122,6 +169,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.max_findings_per_chunk <= 0:
         print("Error: --max-findings-per-chunk must be greater than zero")
+        return 2
+    if args.verification_timeout_seconds <= 0:
+        print("Error: --verification-timeout-seconds must be greater than zero")
+        return 2
+    if args.verification_total_budget_seconds <= 0:
+        print("Error: --verification-total-budget-seconds must be greater than zero")
+        return 2
+    if args.verification_max_findings <= 0:
+        print("Error: --verification-max-findings must be greater than zero")
+        return 2
+    if args.verification_min_confidence < 0.0 or args.verification_min_confidence > 1.0:
+        print("Error: --verification-min-confidence must be between 0.0 and 1.0")
         return 2
 
     cwd = Path.cwd()
@@ -173,6 +232,18 @@ def main(argv: list[str] | None = None) -> int:
     chunk_count = 0
     total_elapsed_seconds = 0.0
     total_time_budget_seconds = args.max_review_seconds
+    candidate_findings = []
+    verified_findings = []
+    verification_rejected_findings = []
+    verification_requests_completed = 0
+    verification_requests_failed = 0
+    verification_requests_skipped = 0
+    verification_valid_count = 0
+    verification_invalid_count = 0
+    verification_unverified_count = 0
+    verification_uncertain_count = 0
+    verification_skipped_count = 0
+    verification_elapsed_seconds = 0.0
 
     active_reviewers = (
         DEFAULT_REVIEWERS if args.review_mode == REVIEW_MODE_SEPARATE else ["consolidated"]
@@ -231,12 +302,72 @@ def main(argv: list[str] | None = None) -> int:
         deduped = deduplicate_findings(proposed)
 
     allowed_severities = {Severity(level) for level in args.severities}
+    candidate_findings = deduped
+    verified_findings = candidate_findings
+
+    verification_model = args.verification_model or str(
+        getattr(llm_client, "model", "") or args.model
+    )
+    if args.verify_findings and candidate_findings:
+        verification_client = llm_client
+        if (
+            provider == "ollama"
+            and verification_model
+            and verification_model != str(getattr(llm_client, "model", ""))
+        ):
+            try:
+                verification_client = create_llm_client(
+                    provider=provider,
+                    model=verification_model,
+                    ollama_host=args.ollama_host,
+                    llm_timeout=args.verification_timeout_seconds,
+                    llm_max_output_tokens=args.llm_max_output_tokens,
+                )
+            except (ValueError, ConnectionError) as exc:
+                print(f"Verification setup error: {exc}")
+                return 2
+
+        verifier = LLMFindingVerifier(verification_client, debug_sink=debug_sink)
+        changed_lines_by_file = {
+            diff_file.path.as_posix(): set(diff_file.changed_lines)
+            for diff_file in snapshot.changed_files
+        }
+        verification_context = VerificationContext(
+            base=args.base,
+            head=args.head,
+            diff_text=context.diff_text,
+            file_contexts=context.file_contexts,
+            changed_lines_by_file=changed_lines_by_file,
+            provider=provider,
+            review_model=str(getattr(llm_client, "model", "") or args.model),
+            verification_model=verification_model,
+            timeout_seconds=args.verification_timeout_seconds,
+            total_budget_seconds=args.verification_total_budget_seconds,
+            max_findings=args.verification_max_findings,
+            min_confidence=args.verification_min_confidence,
+            fail_policy=args.verification_fail_policy,
+            uncertain_policy=args.verification_uncertain_policy,
+        )
+        verification_result = verifier.verify(candidate_findings, verification_context)
+        verified_findings = verification_result.verified_findings
+        verification_rejected_findings = verification_result.verification_rejected_findings
+        verification_requests_completed = verification_result.completed_requests
+        verification_requests_failed = verification_result.failed_requests
+        verification_requests_skipped = verification_result.skipped_requests
+        verification_valid_count = verification_result.valid_count
+        verification_invalid_count = verification_result.invalid_count
+        verification_unverified_count = verification_result.unverified_count
+        verification_uncertain_count = verification_result.uncertain_count
+        verification_skipped_count = verification_result.skipped_count
+        verification_elapsed_seconds = verification_result.elapsed_seconds
+
     accepted, rejected = guard_findings(
-        deduped,
+        verified_findings,
         min_confidence=args.min_confidence,
         allowed_severities=allowed_severities,
         max_published=args.max_published,
     )
+    rejected = [*verification_rejected_findings, *rejected]
 
     result = ReviewResult(
         metadata=ReviewMetadata(
@@ -257,7 +388,28 @@ def main(argv: list[str] | None = None) -> int:
             chunk_count=chunk_count,
             total_elapsed_seconds=total_elapsed_seconds,
             total_time_budget_seconds=total_time_budget_seconds,
+            verification_enabled=args.verify_findings,
+            verification_model=verification_model,
+            verification_fail_policy=args.verification_fail_policy,
+            verification_uncertain_policy=args.verification_uncertain_policy,
+            verification_requests_planned=min(
+                len(candidate_findings), args.verification_max_findings
+            )
+            if args.verify_findings
+            else 0,
+            verification_requests_completed=verification_requests_completed,
+            verification_requests_failed=verification_requests_failed,
+            verification_requests_skipped=verification_requests_skipped,
+            verification_valid_count=verification_valid_count,
+            verification_invalid_count=verification_invalid_count,
+            verification_uncertain_count=verification_uncertain_count,
+            verification_unverified_count=verification_unverified_count,
+            verification_skipped_count=verification_skipped_count,
+            verification_elapsed_seconds=verification_elapsed_seconds,
         ),
+        candidate_findings=candidate_findings,
+        verified_findings=verified_findings,
+        verification_rejected_findings=verification_rejected_findings,
         accepted_findings=accepted,
         rejected_findings=rejected,
     )

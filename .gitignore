@@ -25,3 +25,5 @@ Thumbs.db
 review-result.json
 review-*.json
 test-*.json
+benchmark*.json
+verification*.json
