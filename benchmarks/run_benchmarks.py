@@ -548,7 +548,9 @@ def _run_case(
                 diff_file.path.as_posix(): set(diff_file.changed_lines)
                 for diff_file in snapshot.changed_files
             }
-            verifier = LLMFindingVerifier(verification_client, debug_sink=lambda event: events.append(event))
+            verifier = LLMFindingVerifier(
+                verification_client, debug_sink=lambda event: events.append(event)
+            )
             verifier_context = VerificationContext(
                 base="base",
                 head="head",
@@ -915,8 +917,7 @@ def run(argv: list[str] | None = None) -> int:
                     _serialize_finding(item) for item in execution.verified_findings
                 ],
                 "verification_rejected_findings": [
-                    _serialize_finding(item)
-                    for item in execution.verification_rejected_findings
+                    _serialize_finding(item) for item in execution.verification_rejected_findings
                 ],
                 "accepted_findings": [
                     _serialize_finding(item) for item in execution.accepted_findings
@@ -952,7 +953,11 @@ def run(argv: list[str] | None = None) -> int:
         "review_mode": args.review_mode,
         "benchmark_mode": "verification_only" if verification_only_mode else "end_to_end",
         "run_id": args.run_id
-        or (candidate_dataset.run_id if candidate_dataset else datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")),
+        or (
+            candidate_dataset.run_id
+            if candidate_dataset
+            else datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        ),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "metrics": asdict(metrics),
         "end_to_end_metrics": None if verification_only_mode else stage_metrics,
@@ -1021,7 +1026,12 @@ def run(argv: list[str] | None = None) -> int:
         candidate_output = Path(args.candidate_findings_output)
         candidate_output.parent.mkdir(parents=True, exist_ok=True)
         candidate_output.write_text(
-            json.dumps(candidate_dataset_payload.model_dump(mode="json"), ensure_ascii=False, indent=2, sort_keys=True),
+            json.dumps(
+                candidate_dataset_payload.model_dump(mode="json"),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
             encoding="utf-8",
         )
         print(f"Candidate findings written to: {candidate_output}")

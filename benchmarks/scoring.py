@@ -156,9 +156,7 @@ def normalize_concept_keywords(text: str) -> set[str]:
     normalized = normalized.replace("timeout", "timeout")
     tokens = re.findall(r"[a-z0-9_]+", normalized)
     normalized_tokens = [_CONCEPT_SYNONYMS.get(token, token) for token in tokens]
-    return {
-        token for token in normalized_tokens if token not in _STOP_WORDS and len(token) >= 3
-    }
+    return {token for token in normalized_tokens if token not in _STOP_WORDS and len(token) >= 3}
 
 
 def _line_match(line: int, line_start: int, line_end: int, tolerance: int) -> bool:

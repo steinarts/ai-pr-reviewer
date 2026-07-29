@@ -68,8 +68,7 @@ class FindingVerifier(Protocol):
         self,
         findings: list[Finding],
         context: VerificationContext,
-    ) -> VerificationResult:
-        ...
+    ) -> VerificationResult: ...
 
 
 def _parse_verification_payload(raw_output: str) -> tuple[str, float, str, list[int]]:
@@ -97,7 +96,9 @@ def _parse_verification_payload(raw_output: str) -> tuple[str, float, str, list[
         raise VerificationParseError("Verifier reason must be a non-empty string")
 
     evidence_lines = parsed.get("evidence_lines")
-    if not isinstance(evidence_lines, list) or any(not isinstance(item, int) for item in evidence_lines):
+    if not isinstance(evidence_lines, list) or any(
+        not isinstance(item, int) for item in evidence_lines
+    ):
         raise VerificationParseError("Verifier evidence_lines must be a list[int]")
 
     return verdict, confidence, reason.strip(), evidence_lines
@@ -218,7 +219,9 @@ def build_verification_context(
             if line_nos:
                 local_start = min(line_nos)
                 local_end = max(line_nos)
-                global_start = local_start if global_start is None else min(global_start, local_start)
+                global_start = (
+                    local_start if global_start is None else min(global_start, local_start)
+                )
                 global_end = local_end if global_end is None else max(global_end, local_end)
 
             excerpt_lines = [header, *(raw for _line_no, raw in rendered[start:end])]
@@ -298,7 +301,9 @@ def _verification_schema() -> dict[str, object]:
     }
 
 
-def _is_eligible_for_verification(finding: Finding, changed_lines_by_file: dict[str, set[int]]) -> tuple[bool, str]:
+def _is_eligible_for_verification(
+    finding: Finding, changed_lines_by_file: dict[str, set[int]]
+) -> tuple[bool, str]:
     if finding.file not in changed_lines_by_file:
         return False, "invalid_file"
     changed_lines = changed_lines_by_file[finding.file]
@@ -430,7 +435,9 @@ class LLMFindingVerifier:
 
         eligible: list[Finding] = []
         for finding in findings:
-            is_eligible, reason = _is_eligible_for_verification(finding, context.changed_lines_by_file)
+            is_eligible, reason = _is_eligible_for_verification(
+                finding, context.changed_lines_by_file
+            )
             if is_eligible:
                 eligible.append(finding)
                 continue
@@ -558,7 +565,9 @@ class LLMFindingVerifier:
                     events,
                 )
 
-            system_prompt, user_prompt = _build_verification_prompts(finding, context, slice_context)
+            system_prompt, user_prompt = _build_verification_prompts(
+                finding, context, slice_context
+            )
             prompt_chars = len(system_prompt) + len(user_prompt)
 
             started = perf_counter()
@@ -625,7 +634,11 @@ class LLMFindingVerifier:
 
                 invalid_has_contradiction = _reason_has_clear_contradiction(reason)
 
-                if verdict == "invalid" and confidence >= context.min_confidence and invalid_has_contradiction:
+                if (
+                    verdict == "invalid"
+                    and confidence >= context.min_confidence
+                    and invalid_has_contradiction
+                ):
                     invalid = _with_verification_metadata(
                         finding,
                         status=VerificationStatus.INVALID,
@@ -665,7 +678,11 @@ class LLMFindingVerifier:
                     )
                     continue
 
-                if verdict == "invalid" and confidence >= context.min_confidence and not invalid_has_contradiction:
+                if (
+                    verdict == "invalid"
+                    and confidence >= context.min_confidence
+                    and not invalid_has_contradiction
+                ):
                     reason = (
                         "Invalid verdict downgraded to uncertain because reason did not "
                         f"show clear contradiction: {reason}"
@@ -886,7 +903,12 @@ class FakeFindingVerifier:
         if self.mode == "approve_ids":
             if finding.id in self.valid_ids:
                 return "valid", 0.96, "Fake verifier approved this finding id.", [finding.line]
-            return "invalid", 0.94, "Fake verifier rejected non-whitelisted finding id.", [finding.line]
+            return (
+                "invalid",
+                0.94,
+                "Fake verifier rejected non-whitelisted finding id.",
+                [finding.line],
+            )
         return "valid", 0.96, "Fake verifier approved finding.", [finding.line]
 
     def verify(
@@ -937,7 +959,10 @@ class FakeFindingVerifier:
                 )
                 continue
 
-            if self.budget_exhaust_after is not None and completed_requests >= self.budget_exhaust_after:
+            if (
+                self.budget_exhaust_after is not None
+                and completed_requests >= self.budget_exhaust_after
+            ):
                 skipped = _with_verification_metadata(
                     finding,
                     status=VerificationStatus.SKIPPED,

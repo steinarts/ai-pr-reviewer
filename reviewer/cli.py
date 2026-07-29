@@ -305,7 +305,9 @@ def main(argv: list[str] | None = None) -> int:
     candidate_findings = deduped
     verified_findings = candidate_findings
 
-    verification_model = args.verification_model or str(getattr(llm_client, "model", "") or args.model)
+    verification_model = args.verification_model or str(
+        getattr(llm_client, "model", "") or args.model
+    )
     if args.verify_findings and candidate_findings:
         verification_client = llm_client
         if (
@@ -390,7 +392,9 @@ def main(argv: list[str] | None = None) -> int:
             verification_model=verification_model,
             verification_fail_policy=args.verification_fail_policy,
             verification_uncertain_policy=args.verification_uncertain_policy,
-            verification_requests_planned=min(len(candidate_findings), args.verification_max_findings)
+            verification_requests_planned=min(
+                len(candidate_findings), args.verification_max_findings
+            )
             if args.verify_findings
             else 0,
             verification_requests_completed=verification_requests_completed,

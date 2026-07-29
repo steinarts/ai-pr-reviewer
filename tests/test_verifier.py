@@ -218,7 +218,10 @@ def test_fake_verifier_uncertain_can_be_rejected_by_policy() -> None:
 
     assert result.verified_findings == []
     assert len(result.verification_rejected_findings) == 1
-    assert result.verification_rejected_findings[0].rejection_reason == "verification_uncertain_rejected"
+    assert (
+        result.verification_rejected_findings[0].rejection_reason
+        == "verification_uncertain_rejected"
+    )
 
 
 def test_fake_verifier_parse_failure_uses_unverified_policy() -> None:
@@ -711,4 +714,9 @@ def test_regression_real_findings_stay_valid_and_keep_recall() -> None:
     assert score_command.true_positives == 1
     assert score_resource.true_positives == 1
     assert score_timeout.true_positives == 1
-    assert score_command.false_negatives + score_resource.false_negatives + score_timeout.false_negatives == 0
+    assert (
+        score_command.false_negatives
+        + score_resource.false_negatives
+        + score_timeout.false_negatives
+        == 0
+    )
