@@ -586,6 +586,12 @@ class LLMFindingVerifier:
                 )
                 continue
 
+            system_prompt, user_prompt = _build_verification_prompts(
+                finding,
+                context,
+                slice_context,
+            )
+            prompt_chars = len(system_prompt) + len(user_prompt)
             started = perf_counter()
             self._emit(
                 {
