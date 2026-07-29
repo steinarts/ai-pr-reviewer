@@ -1,0 +1,20 @@
+{
+  "case_id": "real_timeout_not_propagated",
+  "clean": false,
+  "expected_findings": [
+    {
+      "file": "src/client.py",
+      "line_start": 12,
+      "line_end": 18,
+      "category": "reliability",
+      "severity": ["medium", "high"],
+      "concept": "configured timeout is not propagated",
+      "concept_id": "timeout_not_propagated"
+    }
+  ],
+  "forbidden_concepts": [
+    "SQL injection",
+    "database connection",
+    "command injection"
+  ]
+}

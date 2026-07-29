@@ -1,0 +1,19 @@
+{
+  "case_id": "real_resource_leak",
+  "clean": false,
+  "expected_findings": [
+    {
+      "file": "src/storage.py",
+      "line_start": 5,
+      "line_end": 8,
+      "category": "reliability",
+      "severity": ["medium", "high"],
+      "concept": "opened file handle can leak on early return",
+      "concept_id": "resource_leak"
+    }
+  ],
+  "forbidden_concepts": [
+    "SQL injection",
+    "command injection"
+  ]
+}

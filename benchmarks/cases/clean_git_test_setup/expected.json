@@ -1,0 +1,10 @@
+{
+  "case_id": "clean_git_test_setup",
+  "clean": true,
+  "expected_findings": [],
+  "forbidden_concepts": [
+    "command injection",
+    "hardcoded secret",
+    "privilege escalation"
+  ]
+}

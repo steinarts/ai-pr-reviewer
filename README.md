@@ -91,6 +91,14 @@ Hvis du har Ollama installert lokalt:
 --test-max-prompt-tokens N : Approximate max prompt tokens for test chunks (default: 2500)
 --llm-max-output-tokens N : Approximate max output tokens per request (default: 700)
 --max-findings-per-chunk N : Max findings accepted per request (default: 3)
+--verify-findings        : Enable optional skeptical verification stage
+--verification-model MODEL : Optional verification model (default: same as --model)
+--verification-timeout-seconds SEC : Timeout per verification request (default: 60)
+--verification-total-budget-seconds SEC : Total verification budget (default: 180)
+--verification-max-findings N : Max candidate findings to verify (default: 5)
+--verification-min-confidence CONF : Minimum confidence for valid verdict (default: 0.8)
+--verification-fail-policy {unverified,reject} : Behavior on verifier failure (default: unverified)
+--verification-uncertain-policy {unverified,reject} : Behavior on uncertain verdict (default: unverified)
 --dry-run              : Use fake LLM (same as --provider fake)
 --output FILE          : JSON output file (default: review-result.json)
 --max-files N          : Max files to review (default: 30)
@@ -111,6 +119,35 @@ Hvis du har Ollama installert lokalt:
 - Total review scheduling stops when `--max-review-seconds` is exhausted.
 - Exit code is `0` for partial success, and `2` only when all LLM requests fail.
 
+## Optional Two-Step Verification
+
+Du kan aktivere et ekstra verifiseringssteg som vurderer hvert kandidatfunn individuelt før eksisterende guard/publishing.
+
+Flyt:
+
+1. candidate findings fra review
+2. skeptisk verification (valid/invalid/unverified/skipped)
+3. eksisterende guard/publishing
+
+Standard er deaktivert for bakoverkompatibilitet.
+
+```bash
+python review.py --base main --head HEAD \
+   --provider ollama \
+   --model qwen2.5-coder:1.5b \
+   --verify-findings \
+   --verification-timeout-seconds 60 \
+   --verification-total-budget-seconds 180 \
+   --verification-max-findings 5 \
+   --verification-min-confidence 0.8 \
+   --verification-fail-policy unverified \
+   --output review-result.json
+```
+
+Hvis `--verification-model` ikke er satt, brukes samme modell som review.
+
+`uncertain` verdict behandles som `unverified` som standard og sendes videre til eksisterende guard.
+
 Metadata in JSON now includes:
 
 - `chunk_count`
@@ -122,6 +159,8 @@ Metadata in JSON now includes:
 - `skipped_chunks`
 - `reviewer_failures[]` with reviewer/chunk/error details
 - `reviewer_skips[]` with skip reasons (e.g. `no_reviewable_code`, `total_time_budget_exceeded`)
+- `candidate_findings[]`, `verified_findings[]`, `verification_rejected_findings[]`
+- `verification_*` counters and verification elapsed time
 
 ## Troubleshooting Slow Local Models
 

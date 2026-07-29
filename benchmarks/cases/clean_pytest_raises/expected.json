@@ -1,0 +1,10 @@
+{
+  "case_id": "clean_pytest_raises",
+  "clean": true,
+  "expected_findings": [],
+  "forbidden_concepts": [
+    "race condition",
+    "missing sleep",
+    "unhandled exception"
+  ]
+}

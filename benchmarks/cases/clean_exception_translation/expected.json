@@ -1,0 +1,10 @@
+{
+  "case_id": "clean_exception_translation",
+  "clean": true,
+  "expected_findings": [],
+  "forbidden_concepts": [
+    "unhandled exception",
+    "exception swallowed",
+    "lost stack trace"
+  ]
+}
