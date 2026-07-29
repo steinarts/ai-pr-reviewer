@@ -255,7 +255,8 @@ def _build_verification_prompts(
     system_prompt = (
         "You are verifying a candidate code review finding.\n"
         "Do not discover or report new issues.\n"
-        "Your task is to decide whether the core defect claim is contradicted, supported, or uncertain.\n"
+        "Your task is to decide whether the core defect claim is contradicted, "
+        "supported, or uncertain.\n"
         "Focus on defect existence only.\n"
         "Do not reject just because title/severity/consequence/suggestion wording is imperfect.\n"
         "Reject the finding only if the provided code clearly contradicts the candidate claim.\n"
@@ -263,7 +264,8 @@ def _build_verification_prompts(
         "False positives are worse than false negatives.\n"
         "Use invalid only when there is concrete contradictory evidence.\n"
         "Return JSON only with this exact schema:"
-        ' {"verdict":"valid|invalid|uncertain","confidence":0.0,"reason":"...","evidence_lines":[1,2]}\n'
+        ' {"verdict":"valid|invalid|uncertain","confidence":0.0,"reason":"...",'
+        '"evidence_lines":[1,2]}\n'
     )
 
     file_context = context.file_contexts.get(finding.file, "")
@@ -692,7 +694,8 @@ class LLMFindingVerifier:
                 uncertain_reason = reason
                 if confidence < context.min_confidence:
                     uncertain_reason = (
-                        f"Low verification confidence {confidence:.2f} (< {context.min_confidence:.2f}): "
+                        f"Low verification confidence {confidence:.2f} "
+                        f"(< {context.min_confidence:.2f}): "
                         f"{reason}"
                     )
 
@@ -1036,7 +1039,8 @@ class FakeFindingVerifier:
                     uncertain_reason = reason
                     if confidence < context.min_confidence:
                         uncertain_reason = (
-                            f"Low verification confidence {confidence:.2f} (< {context.min_confidence:.2f}): "
+                            f"Low verification confidence {confidence:.2f} "
+                            f"(< {context.min_confidence:.2f}): "
                             f"{reason}"
                         )
                     uncertain_count += 1

@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter, sleep
 
@@ -956,9 +956,9 @@ def run(argv: list[str] | None = None) -> int:
         or (
             candidate_dataset.run_id
             if candidate_dataset
-            else datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            else datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         ),
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "metrics": asdict(metrics),
         "end_to_end_metrics": None if verification_only_mode else stage_metrics,
         "verification_only_metrics": stage_metrics if verification_only_mode else None,
@@ -1002,8 +1002,8 @@ def run(argv: list[str] | None = None) -> int:
     )
 
     if args.candidate_findings_output:
-        run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        timestamp_utc = datetime.now(timezone.utc).isoformat()
+        run_id = args.run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        timestamp_utc = datetime.now(UTC).isoformat()
         sampling_params = _sample_config_for_logging(
             provider=args.provider,
             sampling_seed=args.sampling_seed,
