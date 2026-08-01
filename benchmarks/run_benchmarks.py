@@ -230,7 +230,7 @@ def _finding_key(finding: Finding) -> tuple[str, str, int, str, str]:
 
 
 def _actual_verifier_verdict(execution: CaseExecution) -> str | None:
-    if not execution.candidate_findings:
+    if len(execution.candidate_findings) != 1:
         return None
 
     first_candidate = execution.candidate_findings[0]
