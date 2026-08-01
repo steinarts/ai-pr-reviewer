@@ -1,0 +1,16 @@
+{
+  "case_id": "fake_llm_reviewer_detection_buggy",
+  "clean": false,
+  "expected_findings": [
+    {
+      "file": "reviewer/llm_client.py",
+      "line_start": 36,
+      "line_end": 40,
+      "category": "bug",
+      "severity": ["high"],
+      "concept": "FakeLLMClient infers the reviewer by substring-matching the system prompt, which becomes ambiguous in consolidated mode.",
+      "concept_id": null
+    }
+  ],
+  "forbidden_concepts": []
+}

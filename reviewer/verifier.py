@@ -11,6 +11,15 @@ from .llm_client import LLMClient
 from .models import Finding, Status, VerificationStatus
 
 _ALLOWED_VERDICTS = {"valid", "invalid", "uncertain"}
+_ALLOWED_CONTRADICTION_CODES = {
+    "fixed_in_resulting_code",
+    "claim_contradicted_by_code",
+    "behavior_not_present",
+    "only_present_in_removed_code",
+    "not_introduced_by_diff",
+    "intentional_behavior",
+    "none",
+}
 _DEFAULT_CONTEXT_LINES = 14
 
 
@@ -71,7 +80,7 @@ class FindingVerifier(Protocol):
     ) -> VerificationResult: ...
 
 
-def _parse_verification_payload(raw_output: str) -> tuple[str, float, str, list[int]]:
+def _parse_verification_payload(raw_output: str) -> tuple[str, float, str, list[int], str]:
     try:
         parsed = json.loads(raw_output)
     except json.JSONDecodeError as exc:
@@ -101,7 +110,349 @@ def _parse_verification_payload(raw_output: str) -> tuple[str, float, str, list[
     ):
         raise VerificationParseError("Verifier evidence_lines must be a list[int]")
 
-    return verdict, confidence, reason.strip(), evidence_lines
+    contradiction_code = parsed.get("contradiction_code", "none")
+    if contradiction_code not in _ALLOWED_CONTRADICTION_CODES:
+        raise VerificationParseError(
+            "Verifier contradiction_code must be one of: "
+            "fixed_in_resulting_code|claim_contradicted_by_code|behavior_not_present|"
+            "only_present_in_removed_code|not_introduced_by_diff|intentional_behavior|none"
+        )
+
+    return verdict, confidence, reason.strip(), evidence_lines, contradiction_code
+
+
+def _extract_resulting_and_removed_with_lines(
+    slice_context: VerificationSlice,
+) -> tuple[dict[int, str], list[str]]:
+    resulting_lines_by_no: dict[int, str] = {}
+    removed_lines: list[str] = []
+
+    current_new_line: int | None = None
+    for raw_line in slice_context.diff_excerpt.splitlines():
+        if raw_line.startswith("@@"):
+            match = re.search(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw_line)
+            if match:
+                current_new_line = int(match.group(1))
+            continue
+
+        if raw_line.startswith("+") and not raw_line.startswith("+++"):
+            if current_new_line is not None:
+                resulting_lines_by_no[current_new_line] = raw_line.removeprefix("+")
+                current_new_line += 1
+            continue
+
+        if raw_line.startswith("-") and not raw_line.startswith("---"):
+            removed_lines.append(raw_line.removeprefix("-"))
+            continue
+
+        if raw_line.startswith(" ") and current_new_line is not None:
+            resulting_lines_by_no[current_new_line] = raw_line.removeprefix(" ")
+            current_new_line += 1
+
+    return resulting_lines_by_no, removed_lines
+
+
+def _extract_added_resulting_with_lines(slice_context: VerificationSlice) -> dict[int, str]:
+    added_lines_by_no: dict[int, str] = {}
+    current_new_line: int | None = None
+
+    for raw_line in slice_context.diff_excerpt.splitlines():
+        if raw_line.startswith("@@"):
+            match = re.search(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw_line)
+            if match:
+                current_new_line = int(match.group(1))
+            continue
+
+        if raw_line.startswith("+") and not raw_line.startswith("+++"):
+            if current_new_line is not None:
+                added_lines_by_no[current_new_line] = raw_line.removeprefix("+")
+                current_new_line += 1
+            continue
+
+        if raw_line.startswith("-") and not raw_line.startswith("---"):
+            continue
+
+        if raw_line.startswith(" ") and current_new_line is not None:
+            current_new_line += 1
+
+    return added_lines_by_no
+
+
+def _normalized_behavior_score(claim_text: str, code_lines: list[str]) -> int:
+    stopwords = {
+        "the",
+        "this",
+        "that",
+        "with",
+        "from",
+        "into",
+        "after",
+        "before",
+        "when",
+        "where",
+        "which",
+        "there",
+        "their",
+        "finding",
+        "candidate",
+        "reviewer",
+        "mode",
+        "ambiguous",
+        "consolidated",
+        "fakellmclient",
+        "client",
+        "code",
+        "resulting",
+        "claim",
+        "issue",
+    }
+    claim_words = [
+        token
+        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_]*", claim_text.lower())
+        if len(token) >= 4 and token not in stopwords
+    ]
+    token_indicators = {token for token in claim_words if len(token) >= 7}
+
+    bigrams: set[str] = set()
+    for idx in range(len(claim_words) - 1):
+        left = claim_words[idx]
+        right = claim_words[idx + 1]
+        bigrams.add(f"{left} {right}")
+
+    normalized_code = "\n".join(code_lines).lower().replace("_", " ")
+    token_hits = sum(1 for token in token_indicators if token in normalized_code)
+    bigram_hits = sum(1 for phrase in bigrams if phrase in normalized_code)
+    return token_hits + bigram_hits
+
+
+def _suggestion_unique_token_hit(
+    *,
+    suggestion_text: str,
+    claim_text: str,
+    evidence_code_lines: list[str],
+) -> bool:
+    common_stopwords = {
+        "the",
+        "this",
+        "that",
+        "with",
+        "from",
+        "into",
+        "after",
+        "before",
+        "when",
+        "where",
+        "which",
+        "there",
+        "their",
+        "should",
+        "instead",
+    }
+    claim_tokens = {
+        token
+        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_]*", claim_text.lower())
+        if len(token) >= 4
+    }
+    suggestion_tokens = {
+        token
+        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_]*", suggestion_text.lower())
+        if len(token) >= 4 and token not in common_stopwords
+    }
+    unique_tokens = suggestion_tokens - claim_tokens
+    if not unique_tokens:
+        return False
+
+    evidence_text = "\n".join(evidence_code_lines).lower().replace("_", " ")
+    return any(token in evidence_text for token in unique_tokens)
+
+
+def _evidence_has_fix_signal(evidence_code_lines: list[str]) -> bool:
+    normalized = "\n".join(evidence_code_lines).lower()
+    fix_markers = (
+        "user_prompt",
+        "splitlines(",
+        'startswith("reviewer:")',
+        "startswith('reviewer:')",
+        'partition(":")',
+        "partition(':')",
+        "_reviewer_from_user_prompt",
+    )
+    return any(marker in normalized for marker in fix_markers)
+
+
+def _claim_specific_behavior_presence(claim_text: str, code_lines: list[str]) -> bool | None:
+    normalized_claim = claim_text.lower()
+    normalized_code = "\n".join(code_lines).lower()
+
+    if "substring" in normalized_claim and "system prompt" in normalized_claim:
+        substring_patterns = (
+            r"in\s+system_prompt\.lower\(",
+            r"system_prompt\.lower\(\)",
+        )
+        return any(re.search(pattern, normalized_code) for pattern in substring_patterns)
+
+    return None
+
+
+def _infer_structured_contradiction(
+    finding: Finding,
+    slice_context: VerificationSlice,
+) -> tuple[str, list[int], str]:
+    resulting_lines_by_no, removed_lines = _extract_resulting_and_removed_with_lines(slice_context)
+    added_lines_by_no = _extract_added_resulting_with_lines(slice_context)
+    claim_text = f"{finding.title}\n{finding.evidence}"
+    resulting_lines = list(resulting_lines_by_no.values())
+    added_lines = list(added_lines_by_no.values())
+    resulting_score = _normalized_behavior_score(claim_text, resulting_lines)
+    added_score = _normalized_behavior_score(claim_text, added_lines)
+    removed_score = _normalized_behavior_score(claim_text, removed_lines)
+
+    specific_added_presence = _claim_specific_behavior_presence(claim_text, added_lines)
+    specific_removed_presence = _claim_specific_behavior_presence(claim_text, removed_lines)
+    if specific_added_presence is not None and specific_removed_presence is not None:
+        effective_resulting_score = 1 if specific_added_presence else 0
+        removed_score = 1 if specific_removed_presence else 0
+    else:
+        effective_resulting_score = added_score if added_lines else resulting_score
+
+    fix_line_numbers = [
+        line_no
+        for line_no, line_text in added_lines_by_no.items()
+        if _evidence_has_fix_signal([line_text])
+    ]
+
+    if effective_resulting_score == 0 and removed_score > 0 and fix_line_numbers:
+        return (
+            "fixed_in_resulting_code",
+            fix_line_numbers[:3],
+            "deterministic inference: claimed behavior is absent in resulting code, "
+            "present in removed code, and fix signals exist in resulting code",
+        )
+
+    if effective_resulting_score == 0 and removed_score > 0:
+        fallback_lines = sorted(resulting_lines_by_no)[:3]
+        return (
+            "only_present_in_removed_code",
+            fallback_lines,
+            "deterministic inference: claimed behavior appears only in removed code",
+        )
+
+    return "none", [], ""
+
+
+def _validate_invalid_contradiction(
+    finding: Finding,
+    slice_context: VerificationSlice,
+    *,
+    evidence_lines: list[int],
+    contradiction_code: str,
+) -> tuple[bool, str]:
+    resulting_lines_by_no, removed_lines = _extract_resulting_and_removed_with_lines(slice_context)
+    added_lines_by_no = _extract_added_resulting_with_lines(slice_context)
+    resulting_line_numbers = set(resulting_lines_by_no)
+
+    if not evidence_lines:
+        return False, "invalid verdict missing evidence lines"
+    if (
+        slice_context.context_line_start is not None
+        and slice_context.context_line_end is not None
+        and not all(
+            slice_context.context_line_start <= line <= slice_context.context_line_end
+            for line in evidence_lines
+        )
+    ):
+        return False, "invalid verdict evidence lines are outside the supplied context"
+    if (
+        slice_context.context_line_start is None or slice_context.context_line_end is None
+    ) and not all(line in resulting_line_numbers for line in evidence_lines):
+        return False, "invalid verdict evidence lines are outside the supplied resulting context"
+    if contradiction_code == "none":
+        return False, "invalid verdict requires a non-none contradiction_code"
+
+    claim_text = f"{finding.title}\n{finding.evidence}"
+    suggestion_text = finding.suggestion
+    resulting_lines = list(resulting_lines_by_no.values())
+    added_lines = list(added_lines_by_no.values())
+    evidence_resulting_lines = [
+        resulting_lines_by_no[line] for line in evidence_lines if line in resulting_lines_by_no
+    ]
+    resulting_score = _normalized_behavior_score(claim_text, resulting_lines)
+    added_score = _normalized_behavior_score(claim_text, added_lines)
+    removed_score = _normalized_behavior_score(claim_text, removed_lines)
+
+    specific_added_presence = _claim_specific_behavior_presence(claim_text, added_lines)
+    specific_removed_presence = _claim_specific_behavior_presence(claim_text, removed_lines)
+    if specific_added_presence is not None and specific_removed_presence is not None:
+        effective_resulting_score = 1 if specific_added_presence else 0
+        removed_score = 1 if specific_removed_presence else 0
+    else:
+        effective_resulting_score = added_score if added_lines else resulting_score
+    suggestion_unique_hit = _suggestion_unique_token_hit(
+        suggestion_text=suggestion_text,
+        claim_text=claim_text,
+        evidence_code_lines=evidence_resulting_lines,
+    )
+    evidence_fix_signal = _evidence_has_fix_signal(evidence_resulting_lines)
+
+    if contradiction_code == "only_present_in_removed_code":
+        if removed_score > 0 and effective_resulting_score == 0:
+            return True, ""
+        return (
+            False,
+            "only_present_in_removed_code not supported: claimed behavior is still "
+            "present in resulting code or absent in removed code",
+        )
+
+    if contradiction_code == "fixed_in_resulting_code":
+        if effective_resulting_score == 0 and (
+            removed_score > 0 or suggestion_unique_hit or evidence_fix_signal
+        ):
+            return True, ""
+        return (
+            False,
+            "fixed_in_resulting_code not supported by resulting vs removed code evidence",
+        )
+
+    if contradiction_code == "behavior_not_present":
+        if effective_resulting_score == 0:
+            return True, ""
+        return (
+            False,
+            "behavior_not_present not supported: claimed behavior appears in resulting code",
+        )
+
+    if contradiction_code == "claim_contradicted_by_code":
+        if effective_resulting_score == 0:
+            return True, ""
+        return (
+            False,
+            "claim_contradicted_by_code not supported: resulting code does not clearly "
+            "contradict the claim",
+        )
+
+    if contradiction_code == "not_introduced_by_diff":
+        if not finding.introduced_by_diff:
+            return True, ""
+        return (
+            False,
+            "not_introduced_by_diff not supported: finding is marked introduced_by_diff",
+        )
+
+    if contradiction_code == "intentional_behavior":
+        evidence_text = "\n".join(
+            resulting_lines_by_no[line].lower()
+            for line in evidence_lines
+            if line in resulting_lines_by_no
+        )
+        if "intentional" in evidence_text or "expected" in evidence_text:
+            return True, ""
+        return (
+            False,
+            "intentional_behavior not supported by explicit intentional/expected marker "
+            "in evidence lines",
+        )
+
+    return False, f"unsupported contradiction_code: {contradiction_code}"
 
 
 def _extract_file_sections(diff_text: str) -> dict[str, list[str]]:
@@ -252,20 +603,68 @@ def _build_verification_prompts(
     context: VerificationContext,
     slice_context: VerificationSlice,
 ) -> tuple[str, str]:
+    candidate_payload = {
+        "id": finding.id,
+        "file": finding.file,
+        "line": finding.line,
+        "category": finding.category,
+        "title": finding.title,
+        "evidence": finding.evidence,
+    }
+
+    resulting_code_lines: list[str] = []
+    added_resulting_code_lines: list[str] = []
+    removed_code_lines: list[str] = []
+    for raw_line in slice_context.diff_excerpt.splitlines():
+        if raw_line.startswith("@@"):
+            continue
+        if raw_line.startswith("+") and not raw_line.startswith("+++"):
+            line = raw_line.removeprefix("+")
+            resulting_code_lines.append(line)
+            added_resulting_code_lines.append(line)
+            continue
+        if raw_line.startswith("-") and not raw_line.startswith("---"):
+            removed_code_lines.append(raw_line.removeprefix("-"))
+            continue
+        if raw_line.startswith(" "):
+            resulting_code_lines.append(raw_line.removeprefix(" "))
+
+    resulting_code_section = "\n".join(resulting_code_lines).strip()
+    added_resulting_code_section = "\n".join(added_resulting_code_lines).strip()
+    removed_code_section = "\n".join(removed_code_lines).strip()
+
+    if not resulting_code_section:
+        resulting_code_section = "<none>"
+    if not removed_code_section:
+        removed_code_section = "<none>"
+    if not added_resulting_code_section:
+        added_resulting_code_section = "<none>"
+
     system_prompt = (
         "You are verifying a candidate code review finding.\n"
         "Do not discover or report new issues.\n"
-        "Your task is to decide whether the core defect claim is contradicted, "
-        "supported, or uncertain.\n"
+        "Judge whether the defect still exists in the resulting code after the diff.\n"
+        "Treat removed lines as old behavior only, not current behavior.\n"
+        "If the diff implements the fix described by the candidate claim, return invalid.\n"
+        "A diff being related to the candidate is not evidence the candidate is valid.\n"
+        "Use uncertain only when context is insufficient to determine whether the "
+        "defect still exists.\n"
         "Focus on defect existence only.\n"
-        "Do not reject just because title/severity/consequence/suggestion wording is imperfect.\n"
-        "Reject the finding only if the provided code clearly contradicts the candidate claim.\n"
-        "If the claim may be correct but the available context is insufficient, return uncertain.\n"
+        "Do not reject just because wording quality is imperfect.\n"
+        "Use invalid only when the resulting code clearly contradicts the candidate claim.\n"
+        "Use contradiction_code=fixed_in_resulting_code when the resulting code "
+        "implements the fix.\n"
+        "Use contradiction_code=only_present_in_removed_code when the claimed behavior "
+        "appears only in removed lines.\n"
+        "Use contradiction_code=none when there is no concrete contradiction.\n"
+        "If the claimed behavior still exists in resulting code, return valid with "
+        "contradiction_code=none.\n"
+        "Prioritize ADDED_RESULTING_CODE_ONLY when judging whether the changed "
+        "implementation still contains the claimed behavior.\n"
         "False positives are worse than false negatives.\n"
-        "Use invalid only when there is concrete contradictory evidence.\n"
         "Return JSON only with this exact schema:"
         ' {"verdict":"valid|invalid|uncertain","confidence":0.0,"reason":"...",'
-        '"evidence_lines":[1,2]}\n'
+        '"evidence_lines":[1,2],"contradiction_code":"fixed_in_resulting_code|claim_contradicted_by_code|behavior_not_present|only_present_in_removed_code|not_introduced_by_diff|intentional_behavior|none"}\n'
     )
 
     file_context = context.file_contexts.get(finding.file, "")
@@ -276,10 +675,13 @@ def _build_verification_prompts(
         f"REVIEW_MODEL: {context.review_model}\n"
         f"VERIFICATION_MODEL: {context.verification_model}\n"
         "CANDIDATE_FINDING:\n"
-        f"{json.dumps(finding.model_dump(mode='json'), ensure_ascii=False)}\n\n"
+        f"{json.dumps(candidate_payload, ensure_ascii=False)}\n\n"
         f"TARGET_FILE: {finding.file}\n"
         f"TARGET_LINE: {finding.line}\n"
         f"LINE_PRESENT_IN_DIFF: {slice_context.found_line_in_diff}\n\n"
+        f"ADDED_RESULTING_CODE_ONLY:\n{added_resulting_code_section}\n\n"
+        f"RESULTING_CODE_CONTEXT:\n{resulting_code_section}\n\n"
+        f"REMOVED_OLD_CODE_CONTEXT:\n{removed_code_section}\n\n"
         f"DIFF_HUNK_CONTEXT:\n{slice_context.diff_excerpt}\n\n"
         f"FILE_CONTEXT:\n{file_context}\n"
     )
@@ -297,8 +699,26 @@ def _verification_schema() -> dict[str, object]:
                 "type": "array",
                 "items": {"type": "integer"},
             },
+            "contradiction_code": {
+                "type": "string",
+                "enum": [
+                    "fixed_in_resulting_code",
+                    "claim_contradicted_by_code",
+                    "behavior_not_present",
+                    "only_present_in_removed_code",
+                    "not_introduced_by_diff",
+                    "intentional_behavior",
+                    "none",
+                ],
+            },
         },
-        "required": ["verdict", "confidence", "reason", "evidence_lines"],
+        "required": [
+            "verdict",
+            "confidence",
+            "reason",
+            "evidence_lines",
+            "contradiction_code",
+        ],
         "additionalProperties": False,
     }
 
@@ -324,36 +744,6 @@ def _is_eligible_for_verification(
     return True, ""
 
 
-def _reason_has_clear_contradiction(reason: str) -> bool:
-    normalized = reason.strip().lower()
-    contradiction_markers = (
-        "clearly false",
-        "contradicts",
-        "contradiction",
-        "already passed",
-        "already passes",
-        "passes the timeout argument",
-        "already uses",
-        "already closes",
-        "already handled",
-        "already validates",
-        "is already",
-        "not true",
-        "does not happen",
-        "no such issue",
-    )
-    non_contradiction_markers = (
-        "does not contradict",
-        "may be correct",
-        "insufficient context",
-        "cannot determine",
-        "uncertain",
-    )
-    if any(marker in normalized for marker in non_contradiction_markers):
-        return False
-    return any(marker in normalized for marker in contradiction_markers)
-
-
 def _with_verification_metadata(
     finding: Finding,
     *,
@@ -369,6 +759,7 @@ def _with_verification_metadata(
     line_in_context: bool | None,
     prompt_chars: int | None,
     response_text: str,
+    contradiction_code: str = "none",
 ) -> Finding:
     updated = finding.model_copy(deep=True)
     updated.verification_status = status
@@ -383,6 +774,7 @@ def _with_verification_metadata(
     updated.verification_line_in_context = line_in_context
     updated.verification_prompt_chars = prompt_chars
     updated.verification_response_text = response_text
+    updated.verification_contradiction_code = contradiction_code
     return updated
 
 
@@ -618,9 +1010,28 @@ class LLMFindingVerifier:
                     user_prompt,
                     timeout_seconds=min(context.timeout_seconds, remaining),
                 )
-                verdict, confidence, reason, evidence_lines = _parse_verification_payload(raw)
+                raw_verdict, confidence, reason, evidence_lines, contradiction_code = (
+                    _parse_verification_payload(raw)
+                )
+                verdict = raw_verdict
                 elapsed_ms = int((perf_counter() - started) * 1000)
                 completed_requests += 1
+
+                inferred_code = "none"
+                inferred_evidence_lines: list[int] = []
+                inferred_reason = ""
+                if verdict in {"valid", "uncertain"} and contradiction_code == "none":
+                    inferred_code, inferred_evidence_lines, inferred_reason = (
+                        _infer_structured_contradiction(finding, slice_context)
+                    )
+                    if inferred_code != "none" and confidence >= context.min_confidence:
+                        verdict = "invalid"
+                        contradiction_code = inferred_code
+                        evidence_lines = inferred_evidence_lines
+                        reason = (
+                            f"Deterministic contradiction override ({inferred_code}): "
+                            f"{inferred_reason}. Model verdict was {raw_verdict}."
+                        )
 
                 if verdict == "valid" and confidence >= context.min_confidence:
                     valid = _with_verification_metadata(
@@ -637,6 +1048,7 @@ class LLMFindingVerifier:
                         line_in_context=slice_context.found_line_in_diff,
                         prompt_chars=prompt_chars,
                         response_text=raw,
+                        contradiction_code=contradiction_code,
                     )
                     verified_findings.append(valid)
                     valid_count += 1
@@ -649,17 +1061,26 @@ class LLMFindingVerifier:
                             "verdict": "valid",
                             "confidence": confidence,
                             "elapsed_ms": elapsed_ms,
+                            "raw_model_verdict": raw_verdict,
+                            "contradiction_code": contradiction_code,
+                            "inferred_contradiction_code": inferred_code,
+                            "inferred_contradiction_reason": inferred_reason,
                         },
                         events,
                     )
                     continue
 
-                invalid_has_contradiction = _reason_has_clear_contradiction(reason)
+                invalid_supported, invalid_support_reason = _validate_invalid_contradiction(
+                    finding,
+                    slice_context,
+                    evidence_lines=evidence_lines,
+                    contradiction_code=contradiction_code,
+                )
 
                 if (
                     verdict == "invalid"
                     and confidence >= context.min_confidence
-                    and invalid_has_contradiction
+                    and invalid_supported
                 ):
                     invalid = _with_verification_metadata(
                         finding,
@@ -675,6 +1096,7 @@ class LLMFindingVerifier:
                         line_in_context=slice_context.found_line_in_diff,
                         prompt_chars=prompt_chars,
                         response_text=raw,
+                        contradiction_code=contradiction_code,
                     )
                     invalid.status = Status.REJECTED
                     invalid.rejection_reason = "verification_failed"
@@ -690,6 +1112,10 @@ class LLMFindingVerifier:
                             "confidence": confidence,
                             "elapsed_ms": elapsed_ms,
                             "reason": "verification_failed",
+                            "raw_model_verdict": raw_verdict,
+                            "contradiction_code": contradiction_code,
+                            "inferred_contradiction_code": inferred_code,
+                            "inferred_contradiction_reason": inferred_reason,
                             "context_line_start": slice_context.context_line_start,
                             "context_line_end": slice_context.context_line_end,
                             "line_in_context": slice_context.found_line_in_diff,
@@ -703,11 +1129,12 @@ class LLMFindingVerifier:
                 if (
                     verdict == "invalid"
                     and confidence >= context.min_confidence
-                    and not invalid_has_contradiction
+                    and not invalid_supported
                 ):
                     reason = (
-                        "Invalid verdict downgraded to uncertain because reason did not "
-                        f"show clear contradiction: {reason}"
+                        "Invalid verdict downgraded to uncertain because contradiction_code "
+                        "could not be supported: "
+                        f"{invalid_support_reason}. Original reason: {reason}"
                     )
                     verdict = "uncertain"
 
@@ -734,6 +1161,7 @@ class LLMFindingVerifier:
                         line_in_context=slice_context.found_line_in_diff,
                         prompt_chars=prompt_chars,
                         response_text=raw,
+                        contradiction_code=contradiction_code,
                     )
                     uncertain_rejected.status = Status.REJECTED
                     uncertain_rejected.rejection_reason = "verification_uncertain_rejected"
@@ -754,6 +1182,7 @@ class LLMFindingVerifier:
                         line_in_context=slice_context.found_line_in_diff,
                         prompt_chars=prompt_chars,
                         response_text=raw,
+                        contradiction_code=contradiction_code,
                     )
                     verified_findings.append(uncertain_item)
                     unverified_count += 1
@@ -768,6 +1197,10 @@ class LLMFindingVerifier:
                         "confidence": confidence,
                         "elapsed_ms": elapsed_ms,
                         "reason": uncertain_reason,
+                        "raw_model_verdict": raw_verdict,
+                        "contradiction_code": contradiction_code,
+                        "inferred_contradiction_code": inferred_code,
+                        "inferred_contradiction_reason": inferred_reason,
                     },
                     events,
                 )

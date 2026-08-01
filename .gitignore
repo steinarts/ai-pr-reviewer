@@ -27,3 +27,5 @@ review-*.json
 test-*.json
 benchmark*.json
 verification*.json
+fake*.json
+replay.*.json

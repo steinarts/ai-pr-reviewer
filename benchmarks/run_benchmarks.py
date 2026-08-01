@@ -229,6 +229,21 @@ def _finding_key(finding: Finding) -> tuple[str, str, int, str, str]:
     )
 
 
+def _actual_verifier_verdict(execution: CaseExecution) -> str | None:
+    if not execution.candidate_findings:
+        return None
+
+    first_candidate = execution.candidate_findings[0]
+    key = _finding_key(first_candidate)
+    for finding in execution.verification_rejected_findings:
+        if _finding_key(finding) == key:
+            return finding.verification_verdict or "invalid"
+    for finding in execution.verified_findings:
+        if _finding_key(finding) == key:
+            return finding.verification_verdict or None
+    return None
+
+
 def _compute_delta(
     before: dict[str, float | int],
     after: dict[str, float | int],
@@ -901,6 +916,10 @@ def run(argv: list[str] | None = None) -> int:
     for execution in executions:
         case_score = score_case(execution.ground_truth, execution.scored_findings)
         per_finding_effects.extend(_build_per_finding_effects(execution))
+        replay_case = (
+            candidate_cases_by_id.get(execution.case_id) if verification_only_mode else None
+        )
+        actual_verifier_verdict = _actual_verifier_verdict(execution)
         case_payloads.append(
             {
                 "case_id": execution.case_id,
@@ -909,6 +928,16 @@ def run(argv: list[str] | None = None) -> int:
                 "error": execution.error,
                 "elapsed_seconds": execution.elapsed_seconds,
                 "source_identifier": execution.source_identifier,
+                "replay_source": replay_case.source.model_dump(mode="json")
+                if replay_case and replay_case.source
+                else None,
+                "replay_expected_verdict": replay_case.expected_verdict if replay_case else None,
+                "replay_actual_verifier_verdict": actual_verifier_verdict,
+                "replay_verdict_matches_expectation": (
+                    actual_verifier_verdict == replay_case.expected_verdict
+                    if replay_case and replay_case.expected_verdict and actual_verifier_verdict
+                    else None
+                ),
                 "expected": execution.ground_truth.model_dump(mode="json"),
                 "candidate_findings": [
                     _serialize_finding(item) for item in execution.candidate_findings
