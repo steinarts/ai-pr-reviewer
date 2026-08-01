@@ -307,13 +307,13 @@ def _infer_structured_contradiction(
     added_score = _normalized_behavior_score(claim_text, added_lines)
     removed_score = _normalized_behavior_score(claim_text, removed_lines)
 
-    specific_added_presence = _claim_specific_behavior_presence(claim_text, added_lines)
+    specific_resulting_presence = _claim_specific_behavior_presence(claim_text, resulting_lines)
     specific_removed_presence = _claim_specific_behavior_presence(claim_text, removed_lines)
-    if specific_added_presence is not None and specific_removed_presence is not None:
-        effective_resulting_score = 1 if specific_added_presence else 0
+    if specific_resulting_presence is not None and specific_removed_presence is not None:
+        effective_resulting_score = 1 if specific_resulting_presence else 0
         removed_score = 1 if specific_removed_presence else 0
     else:
-        effective_resulting_score = added_score if added_lines else resulting_score
+        effective_resulting_score = max(resulting_score, added_score)
 
     fix_line_numbers = [
         line_no
