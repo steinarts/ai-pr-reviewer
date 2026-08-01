@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -48,11 +49,20 @@ class CandidateRunConfig(BaseModel):
     sampling_params: dict[str, object] = Field(default_factory=dict)
 
 
+class ReplayCaseSource(BaseModel):
+    pr: int
+    commit: str
+    file: str
+    line: int = Field(ge=1)
+
+
 class CandidateCaseRecord(BaseModel):
     case_id: str
     source_identifier: str
     expected: CaseGroundTruth
     candidate_findings: list[Finding] = Field(default_factory=list)
+    source: ReplayCaseSource | None = None
+    expected_verdict: Literal["valid", "invalid", "uncertain"] | None = None
 
 
 class CandidateDataset(BaseModel):

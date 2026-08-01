@@ -57,6 +57,7 @@ class Finding(BaseModel):
     verification_line_in_context: bool | None = None
     verification_prompt_chars: int | None = None
     verification_response_text: str = ""
+    verification_contradiction_code: str = "none"
 
 
 class FindingsPayload(BaseModel):

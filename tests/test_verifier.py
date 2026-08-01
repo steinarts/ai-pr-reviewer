@@ -110,6 +110,95 @@ def _context(
     )
 
 
+def _contrast_case_setup() -> tuple[VerificationContext, VerificationContext, Finding, Finding]:
+    buggy_diff = (
+        "diff --git a/reviewer/llm_client.py b/reviewer/llm_client.py\n"
+        "--- a/reviewer/llm_client.py\n"
+        "+++ b/reviewer/llm_client.py\n"
+        "@@ -35,1 +35,5 @@\n"
+        '-reviewer = "bug"\n'
+        '+reviewer = "bug"\n'
+        '+if "reliability" in system_prompt.lower():\n'
+        '+    reviewer = "reliability"\n'
+        '+elif "security" in system_prompt.lower():\n'
+        '+    reviewer = "security"\n'
+    )
+    fixed_diff = (
+        "diff --git a/reviewer/llm_client.py b/reviewer/llm_client.py\n"
+        "--- a/reviewer/llm_client.py\n"
+        "+++ b/reviewer/llm_client.py\n"
+        "@@ -35,6 +35,13 @@\n"
+        '-reviewer = "bug"\n'
+        '-if "reliability" in system_prompt.lower():\n'
+        '-    reviewer = "reliability"\n'
+        '-elif "security" in system_prompt.lower():\n'
+        '-    reviewer = "security"\n'
+        "+@staticmethod\n"
+        "+def _reviewer_from_user_prompt(user_prompt: str) -> str:\n"
+        '+    supported_reviewers = {"bug", "reliability", "security", "consolidated"}\n'
+        "+    for line in user_prompt.splitlines():\n"
+        '+        if not line.startswith("REVIEWER:"):\n'
+        "+            continue\n"
+        '+        reviewer = line.partition(":")[2].strip().lower()\n'
+        "+        if reviewer in supported_reviewers:\n"
+        "+            return reviewer\n"
+        "+        break\n"
+        '+    return "bug"\n'
+        "+reviewer = self._reviewer_from_user_prompt(user_prompt)\n"
+    )
+    claim = (
+        "FakeLLMClient infers the reviewer by substring-matching the system prompt, "
+        "which becomes ambiguous in consolidated mode."
+    )
+    buggy_finding = _finding(
+        "contrast-1",
+        file="reviewer/llm_client.py",
+        line=39,
+        title=claim,
+        evidence=claim,
+        consequence="Wrong reviewer category can be emitted in consolidated mode.",
+        suggestion="Parse explicit REVIEWER line from user prompt.",
+    )
+    fixed_finding = _finding(
+        "contrast-1",
+        file="reviewer/llm_client.py",
+        line=40,
+        title=claim,
+        evidence=claim,
+        consequence="Wrong reviewer category can be emitted in consolidated mode.",
+        suggestion="Parse explicit REVIEWER line from user prompt.",
+    )
+    buggy_context = VerificationContext(
+        base="base",
+        head="head",
+        diff_text=buggy_diff,
+        file_contexts={"reviewer/llm_client.py": "FILE: reviewer/llm_client.py"},
+        changed_lines_by_file={"reviewer/llm_client.py": {35, 36, 37, 38, 39}},
+        provider="fake",
+        review_model="qwen2.5-coder:7b",
+        verification_model="qwen2.5-coder:7b",
+        timeout_seconds=2.0,
+        total_budget_seconds=10.0,
+        max_findings=1,
+        min_confidence=0.8,
+    )
+    fixed_context = VerificationContext(
+        base="base",
+        head="head",
+        diff_text=fixed_diff,
+        file_contexts={"reviewer/llm_client.py": "FILE: reviewer/llm_client.py"},
+        changed_lines_by_file={"reviewer/llm_client.py": {40}},
+        provider="fake",
+        review_model="qwen2.5-coder:7b",
+        verification_model="qwen2.5-coder:7b",
+        timeout_seconds=2.0,
+        total_budget_seconds=10.0,
+        max_findings=1,
+        min_confidence=0.8,
+    )
+    return buggy_context, fixed_context, buggy_finding, fixed_finding
+
+
 def test_build_verification_context_only_returns_target_file_hunk() -> None:
     context = _context()
     slice_context = build_verification_context(
@@ -356,6 +445,384 @@ def test_llm_verifier_relevant_prompt_uses_only_target_file_context() -> None:
     assert "tests/test_sync.py" not in prompt
 
 
+def test_llm_verifier_prompt_instructs_resulting_code_not_removed_code() -> None:
+    llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "valid",
+                    "confidence": 0.95,
+                    "reason": "Synthetic response.",
+                    "evidence_lines": [10],
+                }
+            )
+        ]
+    )
+    verifier = LLMFindingVerifier(llm)
+    finding = _finding(
+        "timeout-1",
+        file="src/client.py",
+        line=10,
+        title="Configured timeout is not propagated",
+        evidence="configured timeout is ignored in post call",
+        consequence="request may block indefinitely",
+        suggestion="pass timeout argument",
+    )
+
+    _ = verifier.verify([finding], _context())
+
+    system_prompt, user_prompt = llm.prompts[0]
+    assert "still exists in the resulting code after the diff" in system_prompt
+    assert "Treat removed lines as old behavior only" in system_prompt
+    assert "A diff being related to the candidate is not evidence" in system_prompt
+    assert "Use contradiction_code=fixed_in_resulting_code" in system_prompt
+    assert "Use contradiction_code=only_present_in_removed_code" in system_prompt
+    assert "Use contradiction_code=none" in system_prompt
+    assert "RESULTING_CODE_CONTEXT:" in user_prompt
+    assert "REMOVED_OLD_CODE_CONTEXT:" in user_prompt
+
+
+def test_llm_verifier_prompt_minimizes_candidate_payload_fields() -> None:
+    llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "valid",
+                    "confidence": 0.95,
+                    "reason": "Synthetic response.",
+                    "evidence_lines": [10],
+                }
+            )
+        ]
+    )
+    verifier = LLMFindingVerifier(llm)
+    finding = _finding(
+        "timeout-1",
+        file="src/client.py",
+        line=10,
+        title="Configured timeout is not propagated",
+        evidence="configured timeout is ignored in post call",
+        consequence="request may block indefinitely",
+        suggestion="pass timeout argument",
+    )
+
+    _ = verifier.verify([finding], _context())
+
+    user_prompt = llm.prompts[0][1]
+    assert '"id": "timeout-1"' in user_prompt
+    assert '"file": "src/client.py"' in user_prompt
+    assert '"line": 10' in user_prompt
+    assert '"category": "bug"' in user_prompt
+    assert '"title": "Configured timeout is not propagated"' in user_prompt
+    assert '"evidence": "configured timeout is ignored in post call"' in user_prompt
+    assert '"suggestion":' not in user_prompt
+    assert '"severity":' not in user_prompt
+    assert '"confidence":' not in user_prompt
+    assert '"status":' not in user_prompt
+    assert '"rejection_reason":' not in user_prompt
+    assert '"verification_status":' not in user_prompt
+
+
+def test_llm_verifier_contrast_pair_buggy_valid_fixed_invalid() -> None:
+    buggy_context, fixed_context, buggy_finding, fixed_finding = _contrast_case_setup()
+
+    buggy_llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "valid",
+                    "confidence": 0.99,
+                    "reason": "Resulting code still substring-matches system prompt.",
+                    "evidence_lines": [36, 37, 38, 39, 40],
+                    "contradiction_code": "none",
+                }
+            )
+        ]
+    )
+    fixed_llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "invalid",
+                    "confidence": 0.99,
+                    "reason": (
+                        "The resulting code contradicts the claim by using explicit "
+                        "REVIEWER parsing."
+                    ),
+                    "evidence_lines": [41],
+                    "contradiction_code": "fixed_in_resulting_code",
+                }
+            )
+        ]
+    )
+
+    buggy_result = LLMFindingVerifier(buggy_llm).verify([buggy_finding], buggy_context)
+    fixed_result = LLMFindingVerifier(fixed_llm).verify([fixed_finding], fixed_context)
+
+    assert len(buggy_result.verified_findings) == 1
+    assert buggy_result.verified_findings[0].verification_verdict == "valid"
+    assert len(fixed_result.verification_rejected_findings) == 1
+    assert fixed_result.verification_rejected_findings[0].verification_verdict == "invalid"
+    assert fixed_result.verification_rejected_findings[0].verification_contradiction_code == (
+        "fixed_in_resulting_code"
+    )
+
+
+def test_structured_gate_fixed_invalid_with_supported_code_is_rejected() -> None:
+    _buggy_context, fixed_context, _buggy_finding, fixed_finding = _contrast_case_setup()
+    llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "invalid",
+                    "confidence": 0.99,
+                    "reason": "Resulting code now parses REVIEWER from user_prompt.",
+                    "evidence_lines": [41],
+                    "contradiction_code": "fixed_in_resulting_code",
+                }
+            )
+        ]
+    )
+
+    result = LLMFindingVerifier(llm).verify([fixed_finding], fixed_context)
+
+    assert len(result.verification_rejected_findings) == 1
+    assert result.verification_rejected_findings[0].verification_verdict == "invalid"
+
+
+def test_structured_gate_fixed_invalid_with_none_becomes_uncertain() -> None:
+    _buggy_context, fixed_context, _buggy_finding, fixed_finding = _contrast_case_setup()
+    llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "invalid",
+                    "confidence": 0.99,
+                    "reason": "No structured contradiction provided.",
+                    "evidence_lines": [40],
+                    "contradiction_code": "none",
+                }
+            )
+        ]
+    )
+
+    result = LLMFindingVerifier(llm).verify([fixed_finding], fixed_context)
+
+    assert len(result.verification_rejected_findings) == 0
+    assert len(result.verified_findings) == 1
+    assert result.verified_findings[0].verification_verdict == "uncertain"
+
+
+def test_structured_gate_buggy_invalid_fixed_code_claim_becomes_uncertain() -> None:
+    buggy_context, _fixed_context, buggy_finding, _fixed_finding = _contrast_case_setup()
+    llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "invalid",
+                    "confidence": 0.99,
+                    "reason": "Claimed as fixed, but substring logic remains.",
+                    "evidence_lines": [39],
+                    "contradiction_code": "fixed_in_resulting_code",
+                }
+            )
+        ]
+    )
+
+    result = LLMFindingVerifier(llm).verify([buggy_finding], buggy_context)
+
+    assert len(result.verification_rejected_findings) == 0
+    assert len(result.verified_findings) == 1
+    assert result.verified_findings[0].verification_verdict == "uncertain"
+
+
+def test_structured_gate_buggy_valid_stays_valid() -> None:
+    buggy_context, _fixed_context, buggy_finding, _fixed_finding = _contrast_case_setup()
+    llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "valid",
+                    "confidence": 0.99,
+                    "reason": "Substring behavior still exists in resulting code.",
+                    "evidence_lines": [39],
+                    "contradiction_code": "none",
+                }
+            )
+        ]
+    )
+
+    result = LLMFindingVerifier(llm).verify([buggy_finding], buggy_context)
+
+    assert len(result.verification_rejected_findings) == 0
+    assert len(result.verified_findings) == 1
+    assert result.verified_findings[0].verification_verdict == "valid"
+
+
+def test_structured_gate_invalid_with_evidence_lines_outside_context_becomes_uncertain() -> None:
+    _buggy_context, fixed_context, _buggy_finding, fixed_finding = _contrast_case_setup()
+    llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "invalid",
+                    "confidence": 0.99,
+                    "reason": "Evidence line is outside supplied context.",
+                    "evidence_lines": [999],
+                    "contradiction_code": "fixed_in_resulting_code",
+                }
+            )
+        ]
+    )
+
+    result = LLMFindingVerifier(llm).verify([fixed_finding], fixed_context)
+
+    assert len(result.verification_rejected_findings) == 0
+    assert len(result.verified_findings) == 1
+    assert result.verified_findings[0].verification_verdict == "uncertain"
+
+
+def test_structured_gate_invalid_low_confidence_becomes_uncertain() -> None:
+    _buggy_context, fixed_context, _buggy_finding, fixed_finding = _contrast_case_setup()
+    llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "invalid",
+                    "confidence": 0.50,
+                    "reason": "Low-confidence invalid should not reject.",
+                    "evidence_lines": [40],
+                    "contradiction_code": "fixed_in_resulting_code",
+                }
+            )
+        ]
+    )
+
+    result = LLMFindingVerifier(llm).verify([fixed_finding], fixed_context)
+
+    assert len(result.verification_rejected_findings) == 0
+    assert len(result.verified_findings) == 1
+    assert result.verified_findings[0].verification_verdict == "uncertain"
+
+
+def test_structured_gate_negative_control_does_not_force_invalid_without_clear_fix() -> None:
+    diff_text = (
+        "diff --git a/src/client.py b/src/client.py\n"
+        "--- a/src/client.py\n"
+        "+++ b/src/client.py\n"
+        "@@ -10,4 +10,4 @@\n"
+        "-reviewer = system_prompt.lower()\n"
+        '-if "security" in reviewer:\n'
+        '-    return "security"\n'
+        "-return reviewer\n"
+        "+reviewer = system_prompt.lower()\n"
+        '+audit_log.append("reviewer selected")\n'
+        '+metrics.increment("reviewer.selection")\n'
+        "+return reviewer\n"
+    )
+    context = VerificationContext(
+        base="base",
+        head="head",
+        diff_text=diff_text,
+        file_contexts={"src/client.py": "FILE: src/client.py"},
+        changed_lines_by_file={"src/client.py": {10, 11, 12, 13}},
+        provider="fake",
+        review_model="qwen2.5-coder:7b",
+        verification_model="qwen2.5-coder:7b",
+        timeout_seconds=2.0,
+        total_budget_seconds=10.0,
+        max_findings=1,
+        min_confidence=0.8,
+    )
+    finding = _finding(
+        "negative-control",
+        file="src/client.py",
+        line=10,
+        title="Reviewer selection still relies on system_prompt substring matching",
+        evidence="reviewer is derived from system_prompt.lower() and substring checks",
+        consequence="wrong reviewer can be chosen",
+        suggestion="parse an explicit reviewer field from user input",
+    )
+    llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "valid",
+                    "confidence": 0.99,
+                    "reason": "The behavior still exists in the changed implementation.",
+                    "evidence_lines": [10, 13],
+                    "contradiction_code": "none",
+                }
+            )
+        ]
+    )
+
+    result = LLMFindingVerifier(llm).verify([finding], context)
+
+    assert len(result.verification_rejected_findings) == 0
+    assert len(result.verified_findings) == 1
+    assert result.verified_findings[0].verification_verdict == "valid"
+    assert result.verified_findings[0].verification_contradiction_code == "none"
+
+
+def test_structured_gate_false_fix_control_does_not_force_invalid() -> None:
+    diff_text = (
+        "diff --git a/src/client.py b/src/client.py\n"
+        "--- a/src/client.py\n"
+        "+++ b/src/client.py\n"
+        "@@ -20,3 +20,5 @@\n"
+        "-reviewer = system_prompt.lower()\n"
+        "-return reviewer\n"
+        "+reviewer = system_prompt.lower()\n"
+        "+# TODO parse REVIEWER from user_prompt in a follow-up change\n"
+        '+helper_name = "reviewer_from_user_prompt"\n'
+        "+return reviewer\n"
+    )
+    context = VerificationContext(
+        base="base",
+        head="head",
+        diff_text=diff_text,
+        file_contexts={"src/client.py": "FILE: src/client.py"},
+        changed_lines_by_file={"src/client.py": {20, 21, 22, 23}},
+        provider="fake",
+        review_model="qwen2.5-coder:7b",
+        verification_model="qwen2.5-coder:7b",
+        timeout_seconds=2.0,
+        total_budget_seconds=10.0,
+        max_findings=1,
+        min_confidence=0.8,
+    )
+    finding = _finding(
+        "false-fix-control",
+        file="src/client.py",
+        line=20,
+        title="Reviewer selection still relies on system_prompt substring matching",
+        evidence="reviewer is derived from system_prompt.lower() and substring checks",
+        consequence="wrong reviewer can be chosen",
+        suggestion="parse an explicit reviewer field from user input",
+    )
+    llm = _SequenceLLM(
+        [
+            json.dumps(
+                {
+                    "verdict": "valid",
+                    "confidence": 0.99,
+                    "reason": "Words related to a fix were added, but the behavior remains.",
+                    "evidence_lines": [20, 23],
+                    "contradiction_code": "none",
+                }
+            )
+        ]
+    )
+
+    result = LLMFindingVerifier(llm).verify([finding], context)
+
+    assert len(result.verification_rejected_findings) == 0
+    assert len(result.verified_findings) == 1
+    assert result.verified_findings[0].verification_verdict == "valid"
+    assert result.verified_findings[0].verification_contradiction_code == "none"
+
+
 def test_llm_verifier_ignores_attempt_to_add_new_findings() -> None:
     llm = _SequenceLLM(
         [
@@ -365,6 +832,7 @@ def test_llm_verifier_ignores_attempt_to_add_new_findings() -> None:
                     "confidence": 0.95,
                     "reason": "Valid finding",
                     "evidence_lines": [10],
+                    "contradiction_code": "none",
                     "findings": [
                         {
                             "id": "new-issue",
@@ -402,6 +870,7 @@ def test_llm_verifier_low_confidence_becomes_uncertain_not_invalid() -> None:
                     "confidence": 0.62,
                     "reason": "Could be valid but confidence is low.",
                     "evidence_lines": [10],
+                    "contradiction_code": "none",
                 }
             )
         ]
@@ -435,6 +904,7 @@ def test_llm_verifier_uncertain_from_insufficient_context_not_invalid() -> None:
                     "confidence": 0.92,
                     "reason": "Insufficient context to determine full control flow.",
                     "evidence_lines": [10],
+                    "contradiction_code": "none",
                 }
             )
         ]
@@ -459,30 +929,23 @@ def test_llm_verifier_uncertain_from_insufficient_context_not_invalid() -> None:
 
 
 def test_llm_verifier_invalid_with_contradiction_is_rejected_with_diagnostics() -> None:
+    _buggy_context, fixed_context, _buggy_finding, fixed_finding = _contrast_case_setup()
     llm = _SequenceLLM(
         [
             json.dumps(
                 {
                     "verdict": "invalid",
                     "confidence": 0.94,
-                    "reason": "The diff explicitly passes the timeout argument already.",
-                    "evidence_lines": [11],
+                    "reason": "Resulting code uses explicit REVIEWER parsing from user_prompt.",
+                    "evidence_lines": [41],
+                    "contradiction_code": "fixed_in_resulting_code",
                 }
             )
         ]
     )
     verifier = LLMFindingVerifier(llm)
-    finding = _finding(
-        "wrong-1",
-        file="src/client.py",
-        line=10,
-        title="Timeout missing",
-        evidence="timeout not forwarded",
-        consequence="hang",
-        suggestion="pass timeout",
-    )
 
-    result = verifier.verify([finding], _context())
+    result = verifier.verify([fixed_finding], fixed_context)
 
     assert len(result.verified_findings) == 0
     assert len(result.verification_rejected_findings) == 1
@@ -502,6 +965,7 @@ def test_llm_verifier_invalid_without_clear_contradiction_becomes_uncertain() ->
                     "confidence": 0.96,
                     "reason": "The provided code does not contradict the candidate claim.",
                     "evidence_lines": [10],
+                    "contradiction_code": "none",
                 }
             )
         ]
@@ -534,6 +998,7 @@ def test_llm_verifier_does_not_invalidate_for_weak_suggestion_or_severity() -> N
                     "confidence": 0.93,
                     "reason": "Core defect claim appears correct even if wording is rough.",
                     "evidence_lines": [10, 11],
+                    "contradiction_code": "none",
                 }
             )
         ]

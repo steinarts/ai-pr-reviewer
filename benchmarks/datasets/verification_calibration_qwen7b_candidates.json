@@ -1,0 +1,437 @@
+{
+  "schema_version": 1,
+  "run_id": "qwen7b-calibration-fixed-v1",
+  "timestamp_utc": "2026-07-28T00:00:00Z",
+  "run_config": {
+    "provider": "ollama",
+    "model": "qwen2.5-coder:7b",
+    "review_mode": "consolidated",
+    "llm_timeout": 180.0,
+    "max_review_seconds": 900.0,
+    "reviewers": [
+      "bug",
+      "reliability",
+      "security"
+    ],
+    "max_prompt_tokens": 3500,
+    "test_max_prompt_tokens": 2500,
+    "max_findings_per_request": 3,
+    "reviewer_prompt_fingerprints": {
+      "consolidated": "source=benchmark.qwen-7b.json",
+      "guard": "source=benchmark.qwen-7b.json"
+    },
+    "deterministic_seed": null,
+    "sampling_params": {
+      "provider_supports_seed": true,
+      "seed": null,
+      "temperature": 0.0,
+      "top_p": null,
+      "seed_applied": false
+    }
+  },
+  "cases": [
+    {
+      "case_id": "fake_llm_reviewer_detection_buggy",
+      "source_identifier": "pr-3:f9f7bb84336e29e0fd401540edd9ab89ce747022:reviewer/llm_client.py:40",
+      "source": {
+        "pr": 3,
+        "commit": "f9f7bb84336e29e0fd401540edd9ab89ce747022",
+        "file": "reviewer/llm_client.py",
+        "line": 40
+      },
+      "expected_verdict": "valid",
+      "expected": {
+        "case_id": "fake_llm_reviewer_detection_buggy",
+        "clean": false,
+        "expected_findings": [
+          {
+            "file": "reviewer/llm_client.py",
+            "line_start": 36,
+            "line_end": 40,
+            "category": "bug",
+            "severity": [
+              "high"
+            ],
+            "concept": "FakeLLMClient infers the reviewer by substring-matching the system prompt, which becomes ambiguous in consolidated mode.",
+            "concept_id": null
+          }
+        ],
+        "forbidden_concepts": []
+      },
+      "candidate_findings": [
+        {
+          "id": "fake-llm-reviewer-detection",
+          "file": "reviewer/llm_client.py",
+          "line": 40,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 1.0,
+          "title": "FakeLLMClient infers the reviewer by substring-matching the system prompt, which becomes ambiguous in consolidated mode.",
+          "evidence": "FakeLLMClient infers the reviewer by substring-matching the system prompt, which becomes ambiguous in consolidated mode.",
+          "consequence": "Consolidated review mode can produce findings under the wrong reviewer category.",
+          "suggestion": "Parse an explicit REVIEWER: field from the user prompt instead of substring-matching the system prompt.",
+          "introduced_by_diff": true,
+          "actionable": true,
+          "style_only": false,
+          "duplicate_of": null,
+          "reviewer": "",
+          "status": "accepted",
+          "rejection_reason": ""
+        }
+      ]
+    },
+    {
+      "case_id": "fake_llm_reviewer_detection_fixed",
+      "source_identifier": "pr-3:93a6b62e6de562f4bb5de91b37039e0221a83af4:reviewer/llm_client.py:40",
+      "source": {
+        "pr": 3,
+        "commit": "93a6b62e6de562f4bb5de91b37039e0221a83af4",
+        "file": "reviewer/llm_client.py",
+        "line": 40
+      },
+      "expected_verdict": "invalid",
+      "expected": {
+        "case_id": "fake_llm_reviewer_detection_fixed",
+        "clean": true,
+        "expected_findings": [],
+        "forbidden_concepts": []
+      },
+      "candidate_findings": [
+        {
+          "id": "fake-llm-reviewer-detection",
+          "file": "reviewer/llm_client.py",
+          "line": 40,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 1.0,
+          "title": "FakeLLMClient infers the reviewer by substring-matching the system prompt, which becomes ambiguous in consolidated mode.",
+          "evidence": "FakeLLMClient infers the reviewer by substring-matching the system prompt, which becomes ambiguous in consolidated mode.",
+          "consequence": "Consolidated review mode can produce findings under the wrong reviewer category.",
+          "suggestion": "Parse an explicit REVIEWER: field from the user prompt instead of substring-matching the system prompt.",
+          "introduced_by_diff": true,
+          "actionable": true,
+          "style_only": false,
+          "duplicate_of": null,
+          "reviewer": "",
+          "status": "accepted",
+          "rejection_reason": ""
+        }
+      ]
+    },
+    {
+      "case_id": "clean_exception_translation",
+      "source_identifier": "benchmark.qwen-7b.json:clean_exception_translation",
+      "expected": {
+        "case_id": "clean_exception_translation",
+        "clean": true,
+        "expected_findings": [],
+        "forbidden_concepts": [
+          "unhandled exception",
+          "exception swallowed",
+          "lost stack trace"
+        ]
+      },
+      "candidate_findings": [
+        {
+          "id": "bug",
+          "file": "src/provider.py",
+          "line": 10,
+          "category": "bug",
+          "severity": "low",
+          "confidence": 1.0,
+          "title": "Potential integer conversion error",
+          "evidence": "The function fetch_data attempts to convert a string to an integer without proper validation, which could raise a ValueError if the input is not a valid integer.",
+          "consequence": "If raw_value contains non-integer data, a ValueError will be raised, potentially causing the application to crash or behave unpredictably.",
+          "suggestion": "Add a check to ensure that raw_value is a valid integer before attempting the conversion.",
+          "introduced_by_diff": true,
+          "actionable": true,
+          "style_only": false,
+          "duplicate_of": null,
+          "reviewer": "",
+          "status": "rejected",
+          "rejection_reason": "severity_below_threshold"
+        }
+      ]
+    },
+    {
+      "case_id": "clean_fake_llm_client",
+      "source_identifier": "benchmark.qwen-7b.json:clean_fake_llm_client",
+      "expected": {
+        "case_id": "clean_fake_llm_client",
+        "clean": true,
+        "expected_findings": [],
+        "forbidden_concepts": [
+          "database",
+          "SQL injection",
+          "resource leak"
+        ]
+      },
+      "candidate_findings": [
+        {
+          "id": "1",
+          "file": "src/fake_client.py",
+          "line": 2,
+          "category": "bug",
+          "severity": "low",
+          "confidence": 0.95,
+          "title": "Missing initialization parameter",
+          "evidence": "The __init__ method is missing a required parameter response, which is used in the generate method.",
+          "consequence": "This will cause an error when creating an instance of FakeLLMClient without providing a response.",
+          "suggestion": "Add a default value for response or ensure it is always provided during instantiation.",
+          "introduced_by_diff": true,
+          "actionable": true,
+          "style_only": false,
+          "duplicate_of": null,
+          "reviewer": "",
+          "status": "rejected",
+          "rejection_reason": "severity_below_threshold"
+        },
+        {
+          "id": "2",
+          "file": "src/fake_client.py",
+          "line": 6,
+          "category": "reliability",
+          "severity": "low",
+          "confidence": 0.95,
+          "title": "Hardcoded response",
+          "evidence": "The generate method always returns the same hardcoded string '{}'.",
+          "consequence": "This limits the client's flexibility and makes it less useful for testing different scenarios.",
+          "suggestion": "Allow the response to be passed as a parameter or use a more dynamic approach.",
+          "introduced_by_diff": true,
+          "actionable": true,
+          "style_only": false,
+          "duplicate_of": null,
+          "reviewer": "",
+          "status": "rejected",
+          "rejection_reason": "severity_below_threshold"
+        }
+      ]
+    },
+    {
+      "case_id": "clean_git_test_setup",
+      "source_identifier": "benchmark.qwen-7b.json:clean_git_test_setup",
+      "expected": {
+        "case_id": "clean_git_test_setup",
+        "clean": true,
+        "expected_findings": [],
+        "forbidden_concepts": [
+          "command injection",
+          "hardcoded secret",
+          "privilege escalation"
+        ]
+      },
+      "candidate_findings": []
+    },
+    {
+      "case_id": "clean_model_argument",
+      "source_identifier": "benchmark.qwen-7b.json:clean_model_argument",
+      "expected": {
+        "case_id": "clean_model_argument",
+        "clean": true,
+        "expected_findings": [],
+        "forbidden_concepts": [
+          "command injection",
+          "arbitrary code execution",
+          "shell execution"
+        ]
+      },
+      "candidate_findings": [
+        {
+          "id": "1",
+          "file": "src/cli.py",
+          "line": 7,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 1.0,
+          "title": "Missing parameter in function signature",
+          "evidence": "The create_client function now requires a model_name parameter, but the implementation does not use it.",
+          "consequence": "This will cause an error when calling create_client() without providing a model name.",
+          "suggestion": "Update the implementation to use the model_name parameter in the ProviderClient constructor call.",
+          "introduced_by_diff": true,
+          "actionable": true,
+          "style_only": false,
+          "duplicate_of": null,
+          "reviewer": "",
+          "status": "accepted",
+          "rejection_reason": ""
+        }
+      ]
+    },
+    {
+      "case_id": "clean_pytest_raises",
+      "source_identifier": "benchmark.qwen-7b.json:clean_pytest_raises",
+      "expected": {
+        "case_id": "clean_pytest_raises",
+        "clean": true,
+        "expected_findings": [],
+        "forbidden_concepts": [
+          "race condition",
+          "missing sleep",
+          "unhandled exception"
+        ]
+      },
+      "candidate_findings": [
+        {
+          "id": "bug",
+          "file": "tests/test_sync.py",
+          "line": 5,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 1.0,
+          "title": "Negative value not handled correctly in parse_positive function",
+          "evidence": "The function does not handle negative values, which can lead to unexpected behavior or errors.",
+          "consequence": "Calling parse_positive with a negative value will result in an incorrect return value without raising an exception.",
+          "suggestion": "Add a check for negative values and raise a ValueError if encountered.",
+          "introduced_by_diff": true,
+          "actionable": true,
+          "style_only": false,
+          "duplicate_of": null,
+          "reviewer": "",
+          "status": "accepted",
+          "rejection_reason": ""
+        }
+      ]
+    },
+    {
+      "case_id": "real_command_injection",
+      "source_identifier": "benchmark.qwen-7b.json:real_command_injection",
+      "expected": {
+        "case_id": "real_command_injection",
+        "clean": false,
+        "expected_findings": [
+          {
+            "file": "src/runner.py",
+            "line_start": 4,
+            "line_end": 6,
+            "category": "security",
+            "severity": [
+              "high"
+            ],
+            "concept": "command injection via shell true",
+            "concept_id": "command_injection"
+          }
+        ],
+        "forbidden_concepts": [
+          "database",
+          "resource leak"
+        ]
+      },
+      "candidate_findings": [
+        {
+          "id": "security-1",
+          "file": "src/runner.py",
+          "line": 7,
+          "category": "security",
+          "severity": "high",
+          "confidence": 1.0,
+          "title": "Untrusted input in shell command",
+          "evidence": "The model_name parameter is interpolated into a shell command without proper validation or sanitization.",
+          "consequence": "An attacker could inject malicious code that would be executed by the shell, potentially leading to arbitrary code execution on the system.",
+          "suggestion": "Use subprocess.run with a list of arguments instead of string interpolation to avoid shell injection vulnerabilities.",
+          "introduced_by_diff": true,
+          "actionable": true,
+          "style_only": false,
+          "duplicate_of": null,
+          "reviewer": "",
+          "status": "accepted",
+          "rejection_reason": ""
+        }
+      ]
+    },
+    {
+      "case_id": "real_resource_leak",
+      "source_identifier": "benchmark.qwen-7b.json:real_resource_leak",
+      "expected": {
+        "case_id": "real_resource_leak",
+        "clean": false,
+        "expected_findings": [
+          {
+            "file": "src/storage.py",
+            "line_start": 5,
+            "line_end": 8,
+            "category": "reliability",
+            "severity": [
+              "medium",
+              "high"
+            ],
+            "concept": "opened file handle can leak on early return",
+            "concept_id": "resource_leak"
+          }
+        ],
+        "forbidden_concepts": [
+          "SQL injection",
+          "command injection"
+        ]
+      },
+      "candidate_findings": [
+        {
+          "id": "bug",
+          "file": "src/storage.py",
+          "line": 5,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 1.0,
+          "title": "File handle leak",
+          "evidence": "The file handle is opened but not closed if should_skip is True.",
+          "consequence": "This can lead to resource exhaustion over time.",
+          "suggestion": "Use a context manager or ensure the file is always closed with finally block.",
+          "introduced_by_diff": true,
+          "actionable": true,
+          "style_only": false,
+          "duplicate_of": null,
+          "reviewer": "",
+          "status": "accepted",
+          "rejection_reason": ""
+        }
+      ]
+    },
+    {
+      "case_id": "real_timeout_not_propagated",
+      "source_identifier": "benchmark.qwen-7b.json:real_timeout_not_propagated",
+      "expected": {
+        "case_id": "real_timeout_not_propagated",
+        "clean": false,
+        "expected_findings": [
+          {
+            "file": "src/client.py",
+            "line_start": 12,
+            "line_end": 18,
+            "category": "reliability",
+            "severity": [
+              "medium",
+              "high"
+            ],
+            "concept": "configured timeout is not propagated",
+            "concept_id": "timeout_not_propagated"
+          }
+        ],
+        "forbidden_concepts": [
+          "SQL injection",
+          "database connection",
+          "command injection"
+        ]
+      },
+      "candidate_findings": [
+        {
+          "id": "bug",
+          "file": "src/client.py",
+          "line": 15,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 1.0,
+          "title": "Configured timeout is ignored in blocking call",
+          "evidence": "The variable configured_timeout is assigned the value of self.timeout_seconds, but it is not used in the call to _http.post().",
+          "consequence": "This will result in the blocking HTTP request using a default or unspecified timeout, potentially leading to indefinite waits.",
+          "suggestion": "Use configured_timeout in the _http.post() call.",
+          "introduced_by_diff": true,
+          "actionable": true,
+          "style_only": false,
+          "duplicate_of": null,
+          "reviewer": "",
+          "status": "accepted",
+          "rejection_reason": ""
+        }
+      ]
+    }
+  ]
+}

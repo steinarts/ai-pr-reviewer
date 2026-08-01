@@ -1,0 +1,6 @@
+{
+  "case_id": "fake_llm_reviewer_detection_fixed",
+  "clean": true,
+  "expected_findings": [],
+  "forbidden_concepts": []
+}

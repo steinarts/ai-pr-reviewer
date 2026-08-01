@@ -12,7 +12,13 @@ from benchmarks.run_benchmarks import (
     _materialize_case_repo,
     run,
 )
-from benchmarks.schema import CaseGroundTruth, CasePaths, ExpectedFinding, load_ground_truth
+from benchmarks.schema import (
+    CaseGroundTruth,
+    CasePaths,
+    ExpectedFinding,
+    load_candidate_dataset,
+    load_ground_truth,
+)
 from benchmarks.scoring import (
     detect_forbidden_concepts,
     finding_matches_expected,
@@ -22,6 +28,15 @@ from benchmarks.scoring import (
 )
 from reviewer.models import Finding, ReviewMetadata, ReviewResult, Severity, Status
 from reviewer.verifier import VerificationResult
+
+ROOT = Path(__file__).resolve().parents[1]
+CONTRAST_DATASET = (
+    ROOT / "benchmarks" / "datasets" / "verification_calibration_qwen7b_candidates.json"
+)
+CONTRAST_CLAIM = (
+    "FakeLLMClient infers the reviewer by substring-matching the system prompt, "
+    "which becomes ambiguous in consolidated mode."
+)
 
 
 def _finding(
@@ -1177,3 +1192,110 @@ def test_delta_metrics_correct(monkeypatch, tmp_path: Path) -> None:
     assert delta["new_fn"] == 0
     assert delta["precision_change"] == 0.5
     assert delta["recall_change"] == 0.0
+
+
+def test_contrast_pair_cases_have_same_claim_and_opposite_expected_verdicts() -> None:
+    dataset = load_candidate_dataset(CONTRAST_DATASET)
+    cases_by_id = {item.case_id: item for item in dataset.cases}
+
+    buggy = cases_by_id["fake_llm_reviewer_detection_buggy"]
+    fixed = cases_by_id["fake_llm_reviewer_detection_fixed"]
+
+    assert buggy.expected_verdict == "valid"
+    assert fixed.expected_verdict == "invalid"
+    assert buggy.source is not None
+    assert fixed.source is not None
+    assert buggy.source.pr == 3
+    assert fixed.source.pr == 3
+    assert buggy.source.commit == "f9f7bb84336e29e0fd401540edd9ab89ce747022"
+    assert fixed.source.commit == "93a6b62e6de562f4bb5de91b37039e0221a83af4"
+    assert len(buggy.candidate_findings) == 1
+    assert len(fixed.candidate_findings) == 1
+    assert buggy.candidate_findings[0].title == CONTRAST_CLAIM
+    assert fixed.candidate_findings[0].title == CONTRAST_CLAIM
+    assert buggy.candidate_findings[0].file == "reviewer/llm_client.py"
+    assert fixed.candidate_findings[0].file == "reviewer/llm_client.py"
+    assert buggy.candidate_findings[0].line == 40
+    assert fixed.candidate_findings[0].line == 40
+
+
+def test_contrast_pair_cases_are_reported_independently(monkeypatch, tmp_path: Path) -> None:
+    class ContrastPairVerifier:
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            pass
+
+        def verify(self, findings, context):  # type: ignore[no-untyped-def]
+            if "_reviewer_from_user_prompt" in context.diff_text:
+                rejected = []
+                for item in findings:
+                    copy = item.model_copy(deep=True)
+                    copy.status = Status.REJECTED
+                    copy.rejection_reason = "verification_failed"
+                    copy.verification_verdict = "invalid"
+                    copy.verification_confidence = 0.99
+                    rejected.append(copy)
+                return VerificationResult(
+                    verified_findings=[],
+                    verification_rejected_findings=rejected,
+                    completed_requests=len(findings),
+                    failed_requests=0,
+                    skipped_requests=0,
+                    elapsed_seconds=0.01,
+                    valid_count=0,
+                    invalid_count=len(findings),
+                    uncertain_count=0,
+                    unverified_count=0,
+                    skipped_count=0,
+                    debug_events=[],
+                )
+
+            verified = []
+            for item in findings:
+                copy = item.model_copy(deep=True)
+                copy.verification_verdict = "valid"
+                copy.verification_confidence = 0.99
+                verified.append(copy)
+            return VerificationResult(
+                verified_findings=verified,
+                verification_rejected_findings=[],
+                completed_requests=len(findings),
+                failed_requests=0,
+                skipped_requests=0,
+                elapsed_seconds=0.01,
+                valid_count=len(findings),
+                invalid_count=0,
+                uncertain_count=0,
+                unverified_count=0,
+                skipped_count=0,
+                debug_events=[],
+            )
+
+    monkeypatch.setattr("benchmarks.run_benchmarks.LLMFindingVerifier", ContrastPairVerifier)
+
+    output = tmp_path / "contrast-result.json"
+    exit_code = run(
+        [
+            "--provider",
+            "fake",
+            "--candidate-findings-input",
+            str(CONTRAST_DATASET),
+            "--verify-findings",
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    cases_by_id = {item["case_id"]: item for item in payload["cases"]}
+
+    buggy = cases_by_id["fake_llm_reviewer_detection_buggy"]
+    fixed = cases_by_id["fake_llm_reviewer_detection_fixed"]
+
+    assert buggy["replay_expected_verdict"] == "valid"
+    assert buggy["replay_actual_verifier_verdict"] == "valid"
+    assert buggy["replay_verdict_matches_expectation"] is True
+
+    assert fixed["replay_expected_verdict"] == "invalid"
+    assert fixed["replay_actual_verifier_verdict"] == "invalid"
+    assert fixed["replay_verdict_matches_expectation"] is True
